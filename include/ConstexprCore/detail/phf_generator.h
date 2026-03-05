@@ -19,24 +19,39 @@ consteval void generate_phf(
     // slots[slot] = index into original keys array (declaration order)
     // G[bucket] = seed_or_index telling how to find the slot for keys in that bucket
 
-    // Step 1: Find a primary seed that distributes keys into buckets.
-    // We want no single bucket to be excessively large.
-    // Try seeds 0..999.
-    struct bucket_entry {
+    struct bucket_info {
         std::size_t key_indices[N]{};
         std::size_t count{0};
+        std::size_t bucket_id{0};
     };
 
+    // Max bucket size bound: max(4, isqrt(N) + 2) for N >= 4, else N.
+    // Tighter than the naive N/2+2; keeps displacement search fast.
+    std::size_t max_bucket_size;
+    if constexpr (N < 4) {
+        max_bucket_size = N;
+    } else {
+        std::size_t s = 1;
+        while ((s + 1) * (s + 1) <= N) ++s;
+        max_bucket_size = s + 2;
+    }
+
+    // Step 1: Find a primary seed and build buckets in one pass.
+    std::array<bucket_info, N> buckets{};
     bool found_seed0 = false;
+
     for (std::size_t try_seed = 0; try_seed < 1000; ++try_seed) {
-        std::array<bucket_entry, N> buckets{};
+        for (std::size_t i = 0; i < N; ++i) {
+            buckets[i] = bucket_info{};
+            buckets[i].bucket_id = i;
+        }
+
         bool ok = true;
         for (std::size_t i = 0; i < N; ++i) {
             std::size_t b = seeded_fnv1a(keys[i], try_seed) % N;
             buckets[b].key_indices[buckets[b].count] = i;
             buckets[b].count++;
-            // If any bucket has too many keys, skip this seed
-            if (buckets[b].count > (N < 4 ? N : N / 2 + 2)) {
+            if (buckets[b].count > max_bucket_size) {
                 ok = false;
                 break;
             }
@@ -50,24 +65,7 @@ consteval void generate_phf(
 
     if (!found_seed0) throw "Failed to find primary seed for perfect hash";
 
-    // Step 2: Distribute keys into buckets using selected seed0
-    struct bucket_info {
-        std::size_t key_indices[N]{};
-        std::size_t count{0};
-        std::size_t bucket_id{0};
-    };
-
-    std::array<bucket_info, N> buckets{};
-    for (std::size_t i = 0; i < N; ++i) {
-        buckets[i].bucket_id = i;
-    }
-    for (std::size_t i = 0; i < N; ++i) {
-        std::size_t b = seeded_fnv1a(keys[i], seed0) % N;
-        buckets[b].key_indices[buckets[b].count] = i;
-        buckets[b].count++;
-    }
-
-    // Step 3: Sort buckets by size descending (bubble sort)
+    // Step 2: Sort buckets by size descending (bubble sort)
     for (std::size_t i = 0; i < N; ++i) {
         for (std::size_t j = i + 1; j < N; ++j) {
             if (buckets[j].count > buckets[i].count) {
@@ -90,7 +88,7 @@ consteval void generate_phf(
         G[i] = seed_or_index{0};
     }
 
-    // Step 4: Process multi-key buckets (count >= 2)
+    // Step 3: Process multi-key buckets (count >= 2)
     for (std::size_t bi = 0; bi < N; ++bi) {
         if (buckets[bi].count < 2) break; // sorted, so no more multi-key buckets
 
@@ -143,7 +141,7 @@ consteval void generate_phf(
         if (!found_d) throw "Failed to find displacement seed for bucket";
     }
 
-    // Step 5: Process single-key buckets (count == 1)
+    // Step 4: Process single-key buckets (count == 1)
     for (std::size_t bi = 0; bi < N; ++bi) {
         if (buckets[bi].count != 1) continue;
 
@@ -160,7 +158,7 @@ consteval void generate_phf(
         }
     }
 
-    // Step 6: Validate all slots are filled
+    // Step 5: Validate all slots are filled
     for (std::size_t i = 0; i < N; ++i) {
         if (!occupied[i]) throw "Not all slots filled in perfect hash generation";
     }
