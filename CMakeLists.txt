@@ -34,14 +34,14 @@ target_link_libraries(perfect_hash INTERFACE
 )
 
 # Tests
-option(PHF_BUILD_TESTS "Build tests" ON)
-if(PHF_BUILD_TESTS)
+option(PH_BUILD_TESTS "Build tests" ON)
+if(PH_BUILD_TESTS)
     enable_testing()
     add_subdirectory(tests)
 endif()
 
 # Benchmarks
-option(PHF_BUILD_BENCHMARKS "Build benchmarks" OFF)
-if(PHF_BUILD_BENCHMARKS)
+option(PH_BUILD_BENCHMARKS "Build benchmarks" OFF)
+if(PH_BUILD_BENCHMARKS)
     add_subdirectory(benchmarks)
 endif()

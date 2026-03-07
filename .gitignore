@@ -1,5 +1,41 @@
+# Build directories
 build/
 cmake-build-*/
+out/
+
+# CMake generated files
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+CTestTestfile.cmake
+Makefile
+compile_commands.json
+_deps/
+*.cmake
+!CMakeLists.txt
+
+# Compiled objects
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+
+# IDE / editor
 .idea/
 .vscode/
+*.swp
+*.swo
+*~
+.project
+.cproject
+.settings/
+*.sublime-project
+*.sublime-workspace
+
+# OS artifacts
 .DS_Store
+Thumbs.db
