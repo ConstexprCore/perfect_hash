@@ -8,8 +8,26 @@ FetchContent_Declare(
 set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
 FetchContent_MakeAvailable(benchmark)
 
+FetchContent_Declare(
+    counters
+    GIT_REPOSITORY https://github.com/lemire/counters.git
+    GIT_TAG v2.4.0
+)
+FetchContent_MakeAvailable(counters)
+
+
+add_executable(bench_protocol
+    bench_protocol.cpp
+)
+
 add_executable(phf_benchmarks
     bench_lookup.cpp
+)
+
+
+target_link_libraries(bench_protocol PRIVATE
+    ConstexprCore::perfect_hash
+    counters::counters
 )
 
 target_link_libraries(phf_benchmarks PRIVATE
@@ -18,7 +36,6 @@ target_link_libraries(phf_benchmarks PRIVATE
     benchmark::benchmark_main
 )
 
-target_compile_options(phf_benchmarks PRIVATE
-    $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -O2>
-    $<$<CXX_COMPILER_ID:MSVC>:/W4 /O2>
-)
+if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    message(WARNING "Building benchmarks in debug mode may affect performance measurements.")
+endif()

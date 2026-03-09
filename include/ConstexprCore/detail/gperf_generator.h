@@ -210,6 +210,7 @@ consteval std::size_t select_positions(
     std::array<std::size_t, MAX_CANDIDATES> powers{};
     std::size_t num_candidates = 0;
 
+    // Don't consider positions >= max_len since they yield LAST_CHAR and are redundant.
     for (std::size_t p = 0; p < max_len && num_candidates < MAX_CANDIDATES - 1; ++p) {
         candidates[num_candidates] = p;
         powers[num_candidates] = discriminating_power(keys, p, modulus);
@@ -293,6 +294,7 @@ consteval bool try_generate_gperf(
     // Phase 1: Position selection (use M as modulus since hash computes % M)
     num_positions = select_positions<N>(keys, positions, M);
 
+    // Compute the hash value for a given key using the current association values and positions.
     auto compute = [&](std::string_view key) -> std::size_t {
         std::size_t h = key.size();
         for (std::size_t i = 0; i < num_positions; ++i) {
