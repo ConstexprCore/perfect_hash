@@ -23,9 +23,9 @@ target_link_libraries(phf_tests PRIVATE
 
 target_compile_options(phf_tests PRIVATE
     $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>
-    $<$<CXX_COMPILER_ID:GNU>:-fconstexpr-ops-limit=100000000>
-    $<$<CXX_COMPILER_ID:Clang,AppleClang>:-fconstexpr-steps=100000000>
-    $<$<CXX_COMPILER_ID:MSVC>:/W4 /constexpr:steps100000000>
+    $<$<CXX_COMPILER_ID:GNU>:-fconstexpr-ops-limit=1000000000>
+    $<$<CXX_COMPILER_ID:Clang,AppleClang>:-fconstexpr-steps=1000000000>
+    $<$<CXX_COMPILER_ID:MSVC>:/W4 /constexpr:steps1000000000>
 )
 
 include(${doctest_SOURCE_DIR}/scripts/cmake/doctest.cmake)

@@ -397,6 +397,7 @@ consteval bool try_generate_gperf(
         }
 
         if (solved) {
+            // Verify that the computed hash function produces a perfect hash: no collisions and all keys are assigned to unique slots.
             for (std::size_t i = 0; i < M; ++i) slot_to_key[i] = N;
             for (std::size_t i = 0; i < N; ++i) {
                 std::size_t slot = compute(keys[i]);

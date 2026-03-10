@@ -20,14 +20,25 @@ struct perfect_hash_set {
     std::array<std::size_t, 256> asso_values_{};
     std::size_t num_positions_{};
     std::array<std::size_t, detail::MAX_POSITIONS> positions_{};
-    std::array<std::size_t, TableSize> slot_to_key_{};   // hash_slot -> declaration-order index
-    std::array<std::string_view, N> keys_;
+    std::array<std::size_t, TableSize> key_index_{};   // hash_slot -> declaration-order index
+    std::array<std::string_view, N> original_keys_;  // keys in declaration order
+    std::array<std::string_view, TableSize> keys_;  // keys in hash order, empty slots are empty string_view
 
     // Direct constructor: runs full PHF generation.
     consteval perfect_hash_set(const std::array<std::string_view, N>& keys)
-        : keys_{keys}
+        : original_keys_{keys}
     {
-        detail::generate_gperf<N, TableSize>(keys_, asso_values_, num_positions_, positions_, slot_to_key_);
+        std::array<std::size_t, TableSize> temp_slot_to_key{};
+        detail::generate_gperf<N, TableSize>(keys, asso_values_, num_positions_, positions_, temp_slot_to_key);
+        // Populate keys_ and key_index_
+        for (std::size_t i = 0; i < TableSize; ++i) {
+            key_index_[i] = temp_slot_to_key[i];
+            if (temp_slot_to_key[i] != N) {
+                keys_[i] = original_keys_[temp_slot_to_key[i]];
+            } else {
+                keys_[i] = std::string_view{};
+            }
+        }
     }
 
     // Pre-computed constructor: copies data from a phf_result (no recomputation).
@@ -37,10 +48,15 @@ struct perfect_hash_set {
         : asso_values_{data.asso_values}
         , num_positions_{data.num_positions}
         , positions_{data.positions}
-        , keys_{keys}
+        , original_keys_{keys}
     {
         for (std::size_t i = 0; i < TableSize; ++i) {
-            slot_to_key_[i] = data.slot_to_key[i];
+            key_index_[i] = data.slot_to_key[i];
+            if (data.slot_to_key[i] != N) {
+                keys_[i] = original_keys_[data.slot_to_key[i]];
+            } else {
+                keys_[i] = std::string_view{};
+            }
         }
     }
 
@@ -49,7 +65,7 @@ struct perfect_hash_set {
     [[nodiscard]] constexpr std::size_t table_size() const noexcept { return TableSize; }
 
     [[nodiscard]] constexpr std::string_view key_at(std::size_t i) const noexcept {
-        return keys_[i];
+        return original_keys_[i];
     }
 
     [[nodiscard]] constexpr bool contains(std::string_view key) const noexcept {
@@ -69,9 +85,8 @@ struct perfect_hash_set {
 
     [[nodiscard]] constexpr std::optional<std::size_t> index_of(std::string_view key) const noexcept {
         std::size_t slot = compute_hash(key);
-        std::size_t key_idx = slot_to_key_[slot];
-        if (key_idx < N && keys_[key_idx] == key) {
-            return key_idx;
+        if (slot < TableSize && keys_[slot] == key) {
+            return key_index_[slot];
         }
         return std::nullopt;
     }

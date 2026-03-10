@@ -38,11 +38,11 @@ double pretty_print(const std::string &name, size_t num_values,
 std::vector<std::string_view> populate(size_t length) {
   std::mt19937 gen;
   // we generate a distribution where https is more common
-  std::discrete_distribution<> d({50, 20, 10, 10, 5, 5, 5, 5, 5, 5});
+  std::discrete_distribution<> d({20, 20, 10, 10, 5, 5, 5, 5, 5, 5, 5});
   const static char *options[] = {
       "https\0\0\0",    "http\0\0\0\0",  "ftp\0\0\0\0\0", "file\0\0\0\0",
       "ws\0\0\0\0\0\0", "wss\0\0\0\0\0", "garbage\0",     "fake\0\0\0\0",
-      "httpr\0\0\0",    "filer\0\0\0"};
+      "httpr\0\0\0",    "filer\0\0\0",    "bad\0\0\0\0\0"};
   std::vector<std::string_view> answer;
   answer.reserve(length);
   for (size_t pos = 0; pos < length; pos++) {
@@ -94,9 +94,7 @@ void collect_benchmark_results(size_t number_strings) {
     size_t c = 0;
     for (const auto &str : strings) {
       c += (str == "http" || str == "https" || str == "ftp" || str == "file" ||
-            str == "ws" || str == "wss")
-               ? 1
-               : 0;
+            str == "ws" || str == "wss");
     }
     counter += c;
   };
@@ -104,7 +102,7 @@ void collect_benchmark_results(size_t number_strings) {
   auto count_classic = [&strings, &counter]() {
     size_t c = 0;
     for (const auto &str : strings) {
-      c += hash_is_special(str) ? 1 : 0;
+      c += hash_is_special(str);
     }
     counter += c;
   };
@@ -113,7 +111,7 @@ void collect_benchmark_results(size_t number_strings) {
     size_t c = 0;
 
     for (const auto &str : strings) {
-      c += proto_match.contains(str) ? 1 : 0;
+      c += proto_match.contains(str);
     }
     counter += c;
   };
