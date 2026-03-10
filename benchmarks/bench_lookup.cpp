@@ -1,215 +1,311 @@
 #include <benchmark/benchmark.h>
 #include <ConstexprCore/perfect_hash.h>
-#include <ConstexprCore/constexpr_hash.h>
 #include <unordered_set>
 #include <string_view>
 #include <array>
-
-using namespace std::string_view_literals;
+#include <algorithm>
+#include <cstring>
 
 // ============================================================================
-// HTTP Methods (7 strings)
+// gperf-generated code (included directly)
 // ============================================================================
 
-constexpr auto http_methods = ConstexprCore::make_perfect_set<
+// Suppress gperf's line directives
+#line 1 "http_methods_gperf_wrapper"
+namespace gperf_http {
+#include "http_methods_gperf.inc"
+}
+
+#line 1 "cpp_keywords_gperf_wrapper"
+namespace gperf_kw {
+#include "cpp_keywords_gperf.inc"
+}
+
+// ============================================================================
+// Test data: HTTP Methods (7 strings)
+// ============================================================================
+
+constexpr auto http_phf = ConstexprCore::make_perfect_set<
     "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"
 >();
 
-static const std::unordered_set<std::string_view> http_methods_uset = {
+static const std::unordered_set<std::string_view> http_uset = {
     "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"
 };
 
-static constexpr std::array<std::string_view, 7> http_methods_arr = {
-    "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"
-};
+static constexpr std::array<std::string_view, 7> http_sorted = []{
+    std::array<std::string_view, 7> a = {
+        "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"
+    };
+    std::sort(a.begin(), a.end());
+    return a;
+}();
 
-// Positive lookups
-static constexpr std::array<std::string_view, 3> http_positive = {"GET", "DELETE", "OPTIONS"};
-// Negative lookups
-static constexpr std::array<std::string_view, 3> http_negative = {"CONNECT", "", "gets"};
-
-// -- Perfect hash --
-
-static void BM_PHF_HTTP_Positive(benchmark::State& state) {
-    for (auto _ : state) {
-        for (auto key : http_positive) {
-            benchmark::DoNotOptimize(http_methods.contains(key));
-        }
-    }
-}
-BENCHMARK(BM_PHF_HTTP_Positive);
-
-static void BM_PHF_HTTP_Negative(benchmark::State& state) {
-    for (auto _ : state) {
-        for (auto key : http_negative) {
-            benchmark::DoNotOptimize(http_methods.contains(key));
-        }
-    }
-}
-BENCHMARK(BM_PHF_HTTP_Negative);
-
-// -- Naive linear scan --
-
-static bool naive_contains(std::string_view key) {
-    for (auto m : http_methods_arr) {
-        if (m == key) return true;
-    }
-    return false;
-}
-
-static void BM_Naive_HTTP_Positive(benchmark::State& state) {
-    for (auto _ : state) {
-        for (auto key : http_positive) {
-            benchmark::DoNotOptimize(naive_contains(key));
-        }
-    }
-}
-BENCHMARK(BM_Naive_HTTP_Positive);
-
-static void BM_Naive_HTTP_Negative(benchmark::State& state) {
-    for (auto _ : state) {
-        for (auto key : http_negative) {
-            benchmark::DoNotOptimize(naive_contains(key));
-        }
-    }
-}
-BENCHMARK(BM_Naive_HTTP_Negative);
-
-// -- unordered_set --
-
-static void BM_USet_HTTP_Positive(benchmark::State& state) {
-    for (auto _ : state) {
-        for (auto key : http_positive) {
-            benchmark::DoNotOptimize(http_methods_uset.count(key));
-        }
-    }
-}
-BENCHMARK(BM_USet_HTTP_Positive);
-
-static void BM_USet_HTTP_Negative(benchmark::State& state) {
-    for (auto _ : state) {
-        for (auto key : http_negative) {
-            benchmark::DoNotOptimize(http_methods_uset.count(key));
-        }
-    }
-}
-BENCHMARK(BM_USet_HTTP_Negative);
-
-// -- Switch on fnv1a hash --
-
-static bool switch_hash_contains(std::string_view key) {
-    auto h = ConstexprCore::fnv1a(key);
-    switch (h) {
-        case ConstexprCore::fnv1a(std::string_view{"GET"}):
-            return key == "GET";
-        case ConstexprCore::fnv1a(std::string_view{"POST"}):
-            return key == "POST";
-        case ConstexprCore::fnv1a(std::string_view{"PUT"}):
-            return key == "PUT";
-        case ConstexprCore::fnv1a(std::string_view{"DELETE"}):
-            return key == "DELETE";
-        case ConstexprCore::fnv1a(std::string_view{"PATCH"}):
-            return key == "PATCH";
-        case ConstexprCore::fnv1a(std::string_view{"HEAD"}):
-            return key == "HEAD";
-        case ConstexprCore::fnv1a(std::string_view{"OPTIONS"}):
-            return key == "OPTIONS";
-        default:
-            return false;
-    }
-}
-
-static void BM_SwitchHash_HTTP_Positive(benchmark::State& state) {
-    for (auto _ : state) {
-        for (auto key : http_positive) {
-            benchmark::DoNotOptimize(switch_hash_contains(key));
-        }
-    }
-}
-BENCHMARK(BM_SwitchHash_HTTP_Positive);
-
-static void BM_SwitchHash_HTTP_Negative(benchmark::State& state) {
-    for (auto _ : state) {
-        for (auto key : http_negative) {
-            benchmark::DoNotOptimize(switch_hash_contains(key));
-        }
-    }
-}
-BENCHMARK(BM_SwitchHash_HTTP_Negative);
-
-// ============================================================================
-// URL Protocols (5 strings)
-// ============================================================================
-
-constexpr auto url_protocols = ConstexprCore::make_perfect_set<
-    "http:", "https:", "ftp:", "sftp:", "file:"
->();
-
-static const std::unordered_set<std::string_view> url_protocols_uset = {
-    "http:", "https:", "ftp:", "sftp:", "file:"
-};
-
-static constexpr std::array<std::string_view, 3> proto_positive = {"http:", "ftp:", "file:"};
-static constexpr std::array<std::string_view, 3> proto_negative = {"ssh:", "telnet:", ""};
-
-static void BM_PHF_Proto_Positive(benchmark::State& state) {
-    for (auto _ : state) {
-        for (auto key : proto_positive) {
-            benchmark::DoNotOptimize(url_protocols.contains(key));
-        }
-    }
-}
-BENCHMARK(BM_PHF_Proto_Positive);
-
-static void BM_PHF_Proto_Negative(benchmark::State& state) {
-    for (auto _ : state) {
-        for (auto key : proto_negative) {
-            benchmark::DoNotOptimize(url_protocols.contains(key));
-        }
-    }
-}
-BENCHMARK(BM_PHF_Proto_Negative);
-
-static void BM_USet_Proto_Positive(benchmark::State& state) {
-    for (auto _ : state) {
-        for (auto key : proto_positive) {
-            benchmark::DoNotOptimize(url_protocols_uset.count(key));
-        }
-    }
-}
-BENCHMARK(BM_USet_Proto_Positive);
-
-static void BM_USet_Proto_Negative(benchmark::State& state) {
-    for (auto _ : state) {
-        for (auto key : proto_negative) {
-            benchmark::DoNotOptimize(url_protocols_uset.count(key));
-        }
-    }
-}
-BENCHMARK(BM_USet_Proto_Negative);
-
-// ============================================================================
-// Mixed workload: 50% hit, 50% miss
-// ============================================================================
-
-static constexpr std::array<std::string_view, 6> http_mixed = {
+static constexpr std::array<std::string_view, 3> http_pos = {"GET", "DELETE", "OPTIONS"};
+static constexpr std::array<std::string_view, 3> http_neg = {"CONNECT", "TRACE", "gets"};
+static constexpr std::array<std::string_view, 6> http_mix = {
     "GET", "CONNECT", "POST", "TRACE", "HEAD", "get"
 };
 
-static void BM_PHF_HTTP_Mixed(benchmark::State& state) {
-    for (auto _ : state) {
-        for (auto key : http_mixed) {
-            benchmark::DoNotOptimize(http_methods.contains(key));
-        }
-    }
-}
-BENCHMARK(BM_PHF_HTTP_Mixed);
+// ============================================================================
+// Test data: C++ Keywords (15 strings)
+// ============================================================================
 
-static void BM_USet_HTTP_Mixed(benchmark::State& state) {
+constexpr auto kw_phf = ConstexprCore::make_perfect_set<
+    "auto", "bool", "break", "case", "char",
+    "class", "const", "do", "double", "else",
+    "enum", "float", "for", "goto", "if"
+>();
+
+static const std::unordered_set<std::string_view> kw_uset = {
+    "auto", "bool", "break", "case", "char",
+    "class", "const", "do", "double", "else",
+    "enum", "float", "for", "goto", "if"
+};
+
+static constexpr std::array<std::string_view, 15> kw_sorted = []{
+    std::array<std::string_view, 15> a = {
+        "auto", "bool", "break", "case", "char",
+        "class", "const", "do", "double", "else",
+        "enum", "float", "for", "goto", "if"
+    };
+    std::sort(a.begin(), a.end());
+    return a;
+}();
+
+static constexpr std::array<std::string_view, 5> kw_pos = {"auto", "const", "for", "if", "double"};
+static constexpr std::array<std::string_view, 5> kw_neg = {"int", "void", "return", "string", "while"};
+static constexpr std::array<std::string_view, 6> kw_mix = {
+    "auto", "int", "const", "void", "if", "return"
+};
+
+// ============================================================================
+// Helpers
+// ============================================================================
+
+static bool sorted_contains(const std::string_view* begin, const std::string_view* end,
+                            std::string_view key) {
+    return std::binary_search(begin, end, key);
+}
+
+// ============================================================================
+// HTTP Methods benchmarks
+// ============================================================================
+
+// --- Compile-time PHF ---
+
+static void BM_HTTP_PHF_Positive(benchmark::State& state) {
     for (auto _ : state) {
-        for (auto key : http_mixed) {
-            benchmark::DoNotOptimize(http_methods_uset.count(key));
-        }
+        for (auto key : http_pos)
+            benchmark::DoNotOptimize(http_phf.contains(key));
     }
 }
-BENCHMARK(BM_USet_HTTP_Mixed);
+BENCHMARK(BM_HTTP_PHF_Positive);
+
+static void BM_HTTP_PHF_Negative(benchmark::State& state) {
+    for (auto _ : state) {
+        for (auto key : http_neg)
+            benchmark::DoNotOptimize(http_phf.contains(key));
+    }
+}
+BENCHMARK(BM_HTTP_PHF_Negative);
+
+static void BM_HTTP_PHF_Mixed(benchmark::State& state) {
+    for (auto _ : state) {
+        for (auto key : http_mix)
+            benchmark::DoNotOptimize(http_phf.contains(key));
+    }
+}
+BENCHMARK(BM_HTTP_PHF_Mixed);
+
+// --- gperf ---
+
+static void BM_HTTP_Gperf_Positive(benchmark::State& state) {
+    for (auto _ : state) {
+        for (auto key : http_pos)
+            benchmark::DoNotOptimize(gperf_http::HttpMethodsGperf::lookup(key.data(), key.size()));
+    }
+}
+BENCHMARK(BM_HTTP_Gperf_Positive);
+
+static void BM_HTTP_Gperf_Negative(benchmark::State& state) {
+    for (auto _ : state) {
+        for (auto key : http_neg)
+            benchmark::DoNotOptimize(gperf_http::HttpMethodsGperf::lookup(key.data(), key.size()));
+    }
+}
+BENCHMARK(BM_HTTP_Gperf_Negative);
+
+static void BM_HTTP_Gperf_Mixed(benchmark::State& state) {
+    for (auto _ : state) {
+        for (auto key : http_mix)
+            benchmark::DoNotOptimize(gperf_http::HttpMethodsGperf::lookup(key.data(), key.size()));
+    }
+}
+BENCHMARK(BM_HTTP_Gperf_Mixed);
+
+// --- std::unordered_set ---
+
+static void BM_HTTP_USet_Positive(benchmark::State& state) {
+    for (auto _ : state) {
+        for (auto key : http_pos)
+            benchmark::DoNotOptimize(http_uset.count(key));
+    }
+}
+BENCHMARK(BM_HTTP_USet_Positive);
+
+static void BM_HTTP_USet_Negative(benchmark::State& state) {
+    for (auto _ : state) {
+        for (auto key : http_neg)
+            benchmark::DoNotOptimize(http_uset.count(key));
+    }
+}
+BENCHMARK(BM_HTTP_USet_Negative);
+
+static void BM_HTTP_USet_Mixed(benchmark::State& state) {
+    for (auto _ : state) {
+        for (auto key : http_mix)
+            benchmark::DoNotOptimize(http_uset.count(key));
+    }
+}
+BENCHMARK(BM_HTTP_USet_Mixed);
+
+// --- Sorted array + binary search ---
+
+static void BM_HTTP_BinSearch_Positive(benchmark::State& state) {
+    for (auto _ : state) {
+        for (auto key : http_pos)
+            benchmark::DoNotOptimize(sorted_contains(http_sorted.data(),
+                http_sorted.data() + http_sorted.size(), key));
+    }
+}
+BENCHMARK(BM_HTTP_BinSearch_Positive);
+
+static void BM_HTTP_BinSearch_Negative(benchmark::State& state) {
+    for (auto _ : state) {
+        for (auto key : http_neg)
+            benchmark::DoNotOptimize(sorted_contains(http_sorted.data(),
+                http_sorted.data() + http_sorted.size(), key));
+    }
+}
+BENCHMARK(BM_HTTP_BinSearch_Negative);
+
+static void BM_HTTP_BinSearch_Mixed(benchmark::State& state) {
+    for (auto _ : state) {
+        for (auto key : http_mix)
+            benchmark::DoNotOptimize(sorted_contains(http_sorted.data(),
+                http_sorted.data() + http_sorted.size(), key));
+    }
+}
+BENCHMARK(BM_HTTP_BinSearch_Mixed);
+
+// ============================================================================
+// C++ Keywords benchmarks (15 keys — larger set)
+// ============================================================================
+
+// --- Compile-time PHF ---
+
+static void BM_KW_PHF_Positive(benchmark::State& state) {
+    for (auto _ : state) {
+        for (auto key : kw_pos)
+            benchmark::DoNotOptimize(kw_phf.contains(key));
+    }
+}
+BENCHMARK(BM_KW_PHF_Positive);
+
+static void BM_KW_PHF_Negative(benchmark::State& state) {
+    for (auto _ : state) {
+        for (auto key : kw_neg)
+            benchmark::DoNotOptimize(kw_phf.contains(key));
+    }
+}
+BENCHMARK(BM_KW_PHF_Negative);
+
+static void BM_KW_PHF_Mixed(benchmark::State& state) {
+    for (auto _ : state) {
+        for (auto key : kw_mix)
+            benchmark::DoNotOptimize(kw_phf.contains(key));
+    }
+}
+BENCHMARK(BM_KW_PHF_Mixed);
+
+// --- gperf ---
+
+static void BM_KW_Gperf_Positive(benchmark::State& state) {
+    for (auto _ : state) {
+        for (auto key : kw_pos)
+            benchmark::DoNotOptimize(gperf_kw::CppKeywordsGperf::lookup(key.data(), key.size()));
+    }
+}
+BENCHMARK(BM_KW_Gperf_Positive);
+
+static void BM_KW_Gperf_Negative(benchmark::State& state) {
+    for (auto _ : state) {
+        for (auto key : kw_neg)
+            benchmark::DoNotOptimize(gperf_kw::CppKeywordsGperf::lookup(key.data(), key.size()));
+    }
+}
+BENCHMARK(BM_KW_Gperf_Negative);
+
+static void BM_KW_Gperf_Mixed(benchmark::State& state) {
+    for (auto _ : state) {
+        for (auto key : kw_mix)
+            benchmark::DoNotOptimize(gperf_kw::CppKeywordsGperf::lookup(key.data(), key.size()));
+    }
+}
+BENCHMARK(BM_KW_Gperf_Mixed);
+
+// --- std::unordered_set ---
+
+static void BM_KW_USet_Positive(benchmark::State& state) {
+    for (auto _ : state) {
+        for (auto key : kw_pos)
+            benchmark::DoNotOptimize(kw_uset.count(key));
+    }
+}
+BENCHMARK(BM_KW_USet_Positive);
+
+static void BM_KW_USet_Negative(benchmark::State& state) {
+    for (auto _ : state) {
+        for (auto key : kw_neg)
+            benchmark::DoNotOptimize(kw_uset.count(key));
+    }
+}
+BENCHMARK(BM_KW_USet_Negative);
+
+static void BM_KW_USet_Mixed(benchmark::State& state) {
+    for (auto _ : state) {
+        for (auto key : kw_mix)
+            benchmark::DoNotOptimize(kw_uset.count(key));
+    }
+}
+BENCHMARK(BM_KW_USet_Mixed);
+
+// --- Sorted array + binary search ---
+
+static void BM_KW_BinSearch_Positive(benchmark::State& state) {
+    for (auto _ : state) {
+        for (auto key : kw_pos)
+            benchmark::DoNotOptimize(sorted_contains(kw_sorted.data(),
+                kw_sorted.data() + kw_sorted.size(), key));
+    }
+}
+BENCHMARK(BM_KW_BinSearch_Positive);
+
+static void BM_KW_BinSearch_Negative(benchmark::State& state) {
+    for (auto _ : state) {
+        for (auto key : kw_neg)
+            benchmark::DoNotOptimize(sorted_contains(kw_sorted.data(),
+                kw_sorted.data() + kw_sorted.size(), key));
+    }
+}
+BENCHMARK(BM_KW_BinSearch_Negative);
+
+static void BM_KW_BinSearch_Mixed(benchmark::State& state) {
+    for (auto _ : state) {
+        for (auto key : kw_mix)
+            benchmark::DoNotOptimize(sorted_contains(kw_sorted.data(),
+                kw_sorted.data() + kw_sorted.size(), key));
+    }
+}
+BENCHMARK(BM_KW_BinSearch_Mixed);
