@@ -13,4 +13,4 @@ target_link_libraries(phf_bench PRIVATE
     benchmark::benchmark
     benchmark::benchmark_main
 )
-target_compile_options(phf_bench PRIVATE -fconstexpr-steps=100000000)
+target_compile_options(phf_bench PRIVATE -fconstexpr-steps=500000000)

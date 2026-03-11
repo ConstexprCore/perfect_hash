@@ -8,6 +8,7 @@
 #include <optional>
 #include <tuple>
 #include <cstddef>
+#include <cstdint>
 
 namespace ConstexprCore {
 
@@ -17,30 +18,63 @@ namespace ConstexprCore {
 
 template <std::size_t N, std::size_t TableSize = N>
 struct perfect_hash_set {
-    std::array<std::size_t, 256> asso_values_{};
+    static_assert(TableSize <= 255, "TableSize must be <= 255 for uint8_t asso_values");
+
+    std::array<std::uint8_t, 256> asso_values_{};
     std::size_t num_positions_{};
     std::array<std::size_t, detail::MAX_POSITIONS> positions_{};
-    std::array<std::size_t, TableSize> slot_to_key_{};   // hash_slot -> declaration-order index
+    std::array<std::string_view, TableSize> slot_keys_{};  // hash_slot -> key (empty for unused)
+    std::array<std::uint8_t, TableSize> slot_to_key_{};    // hash_slot -> declaration-order index
     std::array<std::string_view, N> keys_;
 
     // Direct constructor: runs full PHF generation.
     consteval perfect_hash_set(const std::array<std::string_view, N>& keys)
         : keys_{keys}
     {
-        detail::generate_gperf<N, TableSize>(keys_, asso_values_, num_positions_, positions_, slot_to_key_);
+        std::array<std::size_t, 256> full_asso{};
+        std::array<std::size_t, TableSize> wide_slot_to_key{};
+        detail::generate_gperf<N, TableSize>(keys_, full_asso, num_positions_, positions_, wide_slot_to_key);
+        for (std::size_t i = 0; i < 256; ++i)
+            asso_values_[i] = static_cast<std::uint8_t>(full_asso[i] % TableSize);
+        for (std::size_t i = 0; i < TableSize; ++i)
+            slot_to_key_[i] = static_cast<std::uint8_t>(wide_slot_to_key[i]);
+
+        // Verify the reduction didn't break the perfect hash
+        for (std::size_t i = 0; i < N; ++i) {
+            if (slot_to_key_[compute_hash(keys[i])] != i)
+                throw "asso_value reduction broke perfect hash mapping";
+        }
+
+        // Populate slot_keys_ for direct lookup
+        for (std::size_t s = 0; s < TableSize; ++s) {
+            if (slot_to_key_[s] < N)
+                slot_keys_[s] = keys_[slot_to_key_[s]];
+        }
     }
 
     // Pre-computed constructor: copies data from a phf_result (no recomputation).
     consteval perfect_hash_set(
         const std::array<std::string_view, N>& keys,
         const detail::phf_result<N>& data)
-        : asso_values_{data.asso_values}
-        , num_positions_{data.num_positions}
+        : num_positions_{data.num_positions}
         , positions_{data.positions}
         , keys_{keys}
     {
-        for (std::size_t i = 0; i < TableSize; ++i) {
-            slot_to_key_[i] = data.slot_to_key[i];
+        for (std::size_t i = 0; i < 256; ++i)
+            asso_values_[i] = static_cast<std::uint8_t>(data.asso_values[i] % TableSize);
+        for (std::size_t i = 0; i < TableSize; ++i)
+            slot_to_key_[i] = static_cast<std::uint8_t>(data.slot_to_key[i]);
+
+        // Verify the reduction didn't break the perfect hash
+        for (std::size_t i = 0; i < N; ++i) {
+            if (slot_to_key_[compute_hash(keys[i])] != i)
+                throw "asso_value reduction broke perfect hash mapping";
+        }
+
+        // Populate slot_keys_ for direct lookup
+        for (std::size_t s = 0; s < TableSize; ++s) {
+            if (slot_to_key_[s] < N)
+                slot_keys_[s] = keys_[slot_to_key_[s]];
         }
     }
 
@@ -53,7 +87,8 @@ struct perfect_hash_set {
     }
 
     [[nodiscard]] constexpr bool contains(std::string_view key) const noexcept {
-        return index_of(key).has_value();
+        std::size_t slot = compute_hash(key);
+        return slot_to_key_[slot] < N && slot_keys_[slot] == key;
     }
 
     [[nodiscard]] constexpr std::size_t compute_hash(std::string_view key) const noexcept {
@@ -69,9 +104,8 @@ struct perfect_hash_set {
 
     [[nodiscard]] constexpr std::optional<std::size_t> index_of(std::string_view key) const noexcept {
         std::size_t slot = compute_hash(key);
-        std::size_t key_idx = slot_to_key_[slot];
-        if (key_idx < N && keys_[key_idx] == key) {
-            return key_idx;
+        if (slot_to_key_[slot] < N && slot_keys_[slot] == key) {
+            return static_cast<std::size_t>(slot_to_key_[slot]);
         }
         return std::nullopt;
     }
