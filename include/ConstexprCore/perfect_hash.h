@@ -85,7 +85,7 @@ struct perfect_hash_set {
 
     [[nodiscard]] constexpr std::optional<std::size_t> index_of(std::string_view key) const noexcept {
         std::size_t slot = compute_hash(key);
-        if (slot < TableSize && keys_[slot] == key) {
+        if (slot < TableSize && key_index_[slot] < N && keys_[slot] == key) {
             return key_index_[slot];
         }
         return std::nullopt;
@@ -170,10 +170,12 @@ private:
         return matches;
     }
 
+    static constexpr std::size_t EMPTY_SENTINEL = static_cast<std::size_t>(-1);
+
     static constexpr auto make_lengths() noexcept {
         std::array<std::size_t, TableSize> lens{};
         for (std::size_t i = 0; i < TableSize; ++i)
-            lens[i] = Keys[i].length;
+            lens[i] = (KeyIndex[i] < N) ? Keys[i].length : EMPTY_SENTINEL;
         return lens;
     }
 
@@ -318,10 +320,12 @@ private:
         return matches;
     }
 
+    static constexpr std::size_t EMPTY_SENTINEL = static_cast<std::size_t>(-1);
+
     static constexpr auto make_lengths() noexcept {
         std::array<std::size_t, TableSize> lens{};
         for (std::size_t i = 0; i < TableSize; ++i)
-            lens[i] = Keys[i].length;
+            lens[i] = (KeyIndex[i] < N) ? Keys[i].length : EMPTY_SENTINEL;
         return lens;
     }
 
@@ -485,6 +489,37 @@ consteval auto make_constexpr_perfect_set() {
     constexpr auto KeyIndex  = build_key_index<data.table_size>(data);
 
     return constexpr_perfect_hash_set<N, data.table_size, NP, Pos, Asso, MaxLen, HashKeys, KeyIndex>{keys};
+}
+
+// ============================================================================
+// make_perfect_map
+// ============================================================================
+
+template <typename... KVs>
+consteval auto make_perfect_map() {
+    constexpr std::size_t N = sizeof...(KVs);
+    static_assert(N > 0, "make_perfect_map requires at least one entry");
+
+    constexpr std::array<std::string_view, N> keys{KVs::key...};
+
+    // Validate no duplicates
+    for (std::size_t i = 0; i < N; ++i) {
+        for (std::size_t j = i + 1; j < N; ++j) {
+            if (keys[i] == keys[j]) {
+                throw "Duplicate key in make_perfect_map";
+            }
+        }
+    }
+
+    using first_kv = typename std::tuple_element<0, std::tuple<KVs...>>::type;
+    using ValueT = decltype(first_kv::value);
+
+    constexpr std::array<ValueT, N> values{static_cast<ValueT>(KVs::value)...};
+
+    // Compute PHF once (determines table size + all data)
+    constexpr auto data = detail::compute_phf<N>(keys);
+    constexpr std::size_t M = data.table_size;
+    return perfect_hash_map<N, ValueT, M>{keys, values, data};
 }
 
 } // namespace ConstexprCore

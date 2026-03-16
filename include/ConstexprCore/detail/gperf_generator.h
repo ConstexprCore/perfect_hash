@@ -454,7 +454,7 @@ consteval void generate_gperf(
 // array so the same struct type works for any table size up to MaxM.
 template <std::size_t N>
 struct phf_result {
-    static constexpr std::size_t MAX_TABLE_SIZE = N < 8 ? 64 : N * 4;
+    static constexpr std::size_t MAX_TABLE_SIZE = next_power_of_two(N < 8 ? 16 : N) * 4;
     std::size_t table_size{};
     std::array<std::size_t, 256> asso_values{};
     std::size_t num_positions{};
