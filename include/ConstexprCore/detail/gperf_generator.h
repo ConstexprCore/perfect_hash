@@ -10,6 +10,25 @@ namespace ConstexprCore::detail {
 static constexpr std::size_t MAX_POSITIONS = 16;
 static constexpr std::size_t LAST_CHAR = std::size_t(-1);
 
+// Round up to next power of two
+consteval std::size_t next_power_of_two(std::size_t n) {
+    if (n == 0) return 1;
+    n--;
+    n |= n >> 1;
+    n |= n >> 2;
+    n |= n >> 4;
+    n |= n >> 8;
+    n |= n >> 16;
+    n |= n >> 32;
+    n++;
+    return n;
+}
+
+// Check if a number is a power of two
+consteval bool is_power_of_two(std::size_t n) {
+    return n > 0 && (n & (n - 1)) == 0;
+}
+
 // Returns the character at a given position (LAST_CHAR means last character),
 // or 256 as a sentinel if out of bounds.
 constexpr std::size_t char_at(std::string_view key, std::size_t pos) {
@@ -435,7 +454,7 @@ consteval void generate_gperf(
 // array so the same struct type works for any table size up to MaxM.
 template <std::size_t N>
 struct phf_result {
-    static constexpr std::size_t MAX_TABLE_SIZE = N + N / 2 + 1;
+    static constexpr std::size_t MAX_TABLE_SIZE = N < 8 ? 64 : N * 4;
     std::size_t table_size{};
     std::array<std::size_t, 256> asso_values{};
     std::size_t num_positions{};
@@ -470,10 +489,7 @@ consteval bool try_compute_phf(
     return false;
 }
 
-// Recursive template: try M, M+1, ..., MaxM until one succeeds.
-// Note: each `if constexpr` branch instantiates the next template, so this
-// produces up to (MaxM - N) instantiations. Only one branch executes at
-// runtime. This is acceptable for practical key set sizes.
+// Try power-of-two table sizes (M, 2M, 4M, ...) up to MaxM.
 template <std::size_t N, std::size_t M, std::size_t MaxM>
 consteval phf_result<N> compute_phf_impl(
     const std::array<std::string_view, N>& keys)
@@ -483,19 +499,51 @@ consteval phf_result<N> compute_phf_impl(
         return result;
     }
 
-    if constexpr (M + 1 <= MaxM) {
-        return compute_phf_impl<N, M + 1, MaxM>(keys);
+    if constexpr (M * 2 <= MaxM) {
+        return compute_phf_impl<N, M * 2, MaxM>(keys);
     } else {
-        throw "Failed to find a valid table size for perfect hash (tried up to 1.5x key count)";
+        // Return empty result (table_size == 0) to signal failure
+        return result;
     }
 }
 
-// Compute PHF for the given keys, trying table sizes from N up to ~1.5*N.
+// Fallback: try table sizes from N+1 upwards (one at a time).
+template <std::size_t N, std::size_t M, std::size_t MaxM>
+consteval phf_result<N> compute_phf_fallback_impl(
+    const std::array<std::string_view, N>& keys)
+{
+    phf_result<N> result{};
+    if (try_compute_phf<N, M>(keys, result)) {
+        return result;
+    }
+
+    if constexpr (M + 1 <= MaxM) {
+        return compute_phf_fallback_impl<N, M + 1, MaxM>(keys);
+    } else {
+        throw "Failed to find a valid table size for perfect hash";
+    }
+}
+
+template <std::size_t N>
+consteval phf_result<N> compute_phf_fallback(const std::array<std::string_view, N>& keys) {
+    constexpr std::size_t MinM = N + 1;
+    constexpr std::size_t MaxM = N + N/2 + 1;
+    return compute_phf_fallback_impl<N, MinM, MaxM>(keys);
+}
+
+// Compute PHF for the given keys, trying table sizes that are powers of two, starting from the next power of two of N.
 // Returns a phf_result containing all computed data (no recomputation needed).
 template <std::size_t N>
 consteval phf_result<N> compute_phf(const std::array<std::string_view, N>& keys) {
-    constexpr std::size_t MaxM = N + N / 2 + 1;
-    return compute_phf_impl<N, N, MaxM>(keys);
+    constexpr std::size_t MinM = next_power_of_two(N);
+    constexpr std::size_t MaxM = MinM * 4;  // Try up to 4x the minimum power of two
+
+    // First try power-of-two sizes
+    auto result = compute_phf_impl<N, MinM, MaxM>(keys);
+    if (result.table_size != 0) return result;
+
+    // If no power-of-two size works, fall back to original algorithm
+    return compute_phf_fallback<N>(keys);
 }
 
 } // namespace ConstexprCore::detail

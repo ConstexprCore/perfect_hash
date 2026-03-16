@@ -132,7 +132,11 @@ struct constexpr_perfect_hash_set {
                 h += AssoValues[ch];
             }
         }
-        return h % TableSize;
+        if constexpr (detail::is_power_of_two(TableSize)) {
+            return h & (TableSize - 1);
+        } else {
+            return h % TableSize;
+        }
     }
 
     [[nodiscard]] constexpr bool contains(std::string_view key) const noexcept {
@@ -270,6 +274,7 @@ consteval auto make_constexpr_perfect_set() {
 
     constexpr auto data    = detail::compute_phf<N>(keys);
     constexpr std::size_t M  = data.table_size;
+    static_assert(M > 0, "Failed to generate perfect hash function");
     constexpr std::size_t NP = data.num_positions;
     constexpr auto Pos       = data.positions;
     constexpr auto Asso      = data.asso_values;
