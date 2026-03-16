@@ -1,0 +1,26 @@
+%{
+#include <cstring>
+%}
+%language=C++
+%define class-name CppKeywordsGperf
+%define lookup-function-name lookup
+%readonly-tables
+%enum
+%compare-strncmp
+%%
+auto
+bool
+break
+case
+char
+class
+const
+do
+double
+else
+enum
+float
+for
+goto
+if
+%%

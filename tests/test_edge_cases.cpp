@@ -240,7 +240,7 @@ TEST_SUITE("edge_cases") {
     }
 
     TEST_CASE("non-minimal table size (M > N)") {
-        constexpr ConstexprCore::perfect_hash_set<3, 5> non_min{
+        constexpr ConstexprCore::perfect_hash_set<3, 5, 5> non_min{
             std::array<std::string_view, 3>{"alpha", "beta", "gamma"}
         };
         static_assert(non_min.size() == 3);

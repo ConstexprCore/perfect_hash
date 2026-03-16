@@ -1,0 +1,18 @@
+%{
+#include <cstring>
+%}
+%language=C++
+%define class-name HttpMethodsGperf
+%define lookup-function-name lookup
+%readonly-tables
+%enum
+%compare-strncmp
+%%
+GET
+POST
+PUT
+DELETE
+PATCH
+HEAD
+OPTIONS
+%%
