@@ -97,23 +97,43 @@ struct perfect_hash_set {
 // PHF parameters are baked into the type as non-type template parameters.
 // ============================================================================
 
+template <std::size_t MaxLen>
+struct fixed_string_view {
+    std::array<char, MaxLen> data{};
+    std::size_t length{};
+
+    constexpr fixed_string_view() = default;
+
+    constexpr fixed_string_view(std::string_view sv) : length{sv.size()} {
+        for (std::size_t i = 0; i < sv.size(); ++i)
+            data[i] = sv[i];
+    }
+
+    [[nodiscard]] constexpr std::string_view view() const noexcept {
+        return {data.data(), length};
+    }
+
+    [[nodiscard]] constexpr bool operator==(std::string_view sv) const noexcept {
+        return view() == sv;
+    }
+};
+
 template <
     std::size_t N,
     std::size_t TableSize,
     std::size_t NumPositions,
     std::array<std::size_t, detail::MAX_POSITIONS> Positions,
-    std::array<std::size_t, 256> AssoValues
+    std::array<std::size_t, 256> AssoValues,
+    std::size_t MaxKeyLen,
+    std::array<fixed_string_view<MaxKeyLen>, TableSize> Keys,
+    std::array<std::size_t, TableSize> KeyIndex
 >
 struct constexpr_perfect_hash_set {
-    std::array<std::size_t, TableSize> key_index_{};
     std::array<std::string_view, N> original_keys_;
-    std::array<std::string_view, TableSize> keys_;  // keys in hash order, empty slots are empty string_view
 
     consteval constexpr_perfect_hash_set(
-        const std::array<std::string_view, N>& keys,
-        const std::array<std::size_t, TableSize>& ki,
-        const std::array<std::string_view, TableSize>& hkeys)
-        : key_index_{ki}, original_keys_{keys}, keys_{hkeys}
+        const std::array<std::string_view, N>& keys)
+        : original_keys_{keys}
     {}
 
     [[nodiscard]] constexpr std::size_t size() const noexcept { return N; }
@@ -141,13 +161,13 @@ struct constexpr_perfect_hash_set {
 
     [[nodiscard]] constexpr bool contains(std::string_view key) const noexcept {
         std::size_t slot = compute_hash(key);
-        return slot < TableSize && keys_[slot] == key;
+        return slot < TableSize && Keys[slot] == key;
     }
 
     [[nodiscard]] constexpr std::optional<std::size_t> index_of(std::string_view key) const noexcept {
         std::size_t slot = compute_hash(key);
-        if (slot < TableSize && keys_[slot] == key) {
-            return key_index_[slot];
+        if (slot < TableSize && Keys[slot] == key) {
+            return KeyIndex[slot];
         }
         return std::nullopt;
     }
@@ -233,14 +253,16 @@ consteval auto make_perfect_set() {
 // ============================================================================
 
 namespace detail {
-    template <std::size_t M, std::size_t N>
-    consteval std::array<std::string_view, M> build_hash_keys(
+    template <std::size_t MaxLen, std::size_t M, std::size_t N>
+    consteval std::array<fixed_string_view<MaxLen>, M> build_hash_keys(
         const std::array<std::string_view, N>& keys,
         const phf_result<N>& data)
     {
-        std::array<std::string_view, M> hkeys{};
+        std::array<fixed_string_view<MaxLen>, M> hkeys{};
         for (std::size_t i = 0; i < M; ++i) {
-            hkeys[i] = (data.slot_to_key[i] != N) ? keys[data.slot_to_key[i]] : std::string_view{};
+            if (data.slot_to_key[i] != N) {
+                hkeys[i] = fixed_string_view<MaxLen>(keys[data.slot_to_key[i]]);
+            }
         }
         return hkeys;
     }
@@ -278,10 +300,11 @@ consteval auto make_constexpr_perfect_set() {
     constexpr std::size_t NP = data.num_positions;
     constexpr auto Pos       = data.positions;
     constexpr auto Asso      = data.asso_values;
-    constexpr auto HashKeys  = detail::build_hash_keys<M>(keys, data);
+    constexpr std::size_t MaxLen = detail::max_key_length(keys);
+    constexpr auto HashKeys  = detail::build_hash_keys<MaxLen, M>(keys, data);
     constexpr auto KeyIndex  = detail::build_key_index<M>(data);
 
-    return constexpr_perfect_hash_set<N, M, NP, Pos, Asso>{keys, KeyIndex, HashKeys};
+    return constexpr_perfect_hash_set<N, M, NP, Pos, Asso, MaxLen, HashKeys, KeyIndex>{keys};
 }
 
 // ============================================================================
