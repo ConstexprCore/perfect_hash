@@ -93,6 +93,63 @@ struct perfect_hash_set {
 };
 
 // ============================================================================
+// constexpr_perfect_hash_set
+// PHF parameters are baked into the type as non-type template parameters.
+// ============================================================================
+
+template <
+    std::size_t N,
+    std::size_t TableSize,
+    std::size_t NumPositions,
+    std::array<std::size_t, detail::MAX_POSITIONS> Positions,
+    std::array<std::size_t, 256> AssoValues
+>
+struct constexpr_perfect_hash_set {
+    std::array<std::size_t, TableSize> key_index_{};
+    std::array<std::string_view, N> original_keys_;
+    std::array<std::string_view, TableSize> keys_;  // keys in hash order, empty slots are empty string_view
+
+    consteval constexpr_perfect_hash_set(
+        const std::array<std::string_view, N>& keys,
+        const std::array<std::size_t, TableSize>& ki,
+        const std::array<std::string_view, TableSize>& hkeys)
+        : key_index_{ki}, original_keys_{keys}, keys_{hkeys}
+    {}
+
+    [[nodiscard]] constexpr std::size_t size() const noexcept { return N; }
+
+    [[nodiscard]] constexpr std::size_t table_size() const noexcept { return TableSize; }
+
+    [[nodiscard]] constexpr std::string_view key_at(std::size_t i) const noexcept {
+        return original_keys_[i];
+    }
+
+    [[nodiscard]] constexpr std::size_t compute_hash(std::string_view key) const noexcept {
+        std::size_t h = key.size();
+        for (std::size_t i = 0; i < NumPositions; ++i) {
+            std::size_t ch = detail::char_at(key, Positions[i]);
+            if (ch < 256) {
+                h += AssoValues[ch];
+            }
+        }
+        return h % TableSize;
+    }
+
+    [[nodiscard]] constexpr bool contains(std::string_view key) const noexcept {
+        std::size_t slot = compute_hash(key);
+        return slot < TableSize && keys_[slot] == key;
+    }
+
+    [[nodiscard]] constexpr std::optional<std::size_t> index_of(std::string_view key) const noexcept {
+        std::size_t slot = compute_hash(key);
+        if (slot < TableSize && keys_[slot] == key) {
+            return key_index_[slot];
+        }
+        return std::nullopt;
+    }
+};
+
+// ============================================================================
 // perfect_hash_map
 // ============================================================================
 
@@ -165,6 +222,61 @@ consteval auto make_perfect_set() {
     constexpr auto data = detail::compute_phf<N>(keys);
     constexpr std::size_t M = data.table_size;
     return perfect_hash_set<N, M>{keys, data};
+}
+
+// ============================================================================
+// make_constexpr_perfect_set
+// ============================================================================
+
+namespace detail {
+    template <std::size_t M, std::size_t N>
+    consteval std::array<std::string_view, M> build_hash_keys(
+        const std::array<std::string_view, N>& keys,
+        const phf_result<N>& data)
+    {
+        std::array<std::string_view, M> hkeys{};
+        for (std::size_t i = 0; i < M; ++i) {
+            hkeys[i] = (data.slot_to_key[i] != N) ? keys[data.slot_to_key[i]] : std::string_view{};
+        }
+        return hkeys;
+    }
+
+    template <std::size_t M, std::size_t N>
+    consteval std::array<std::size_t, M> build_key_index(const phf_result<N>& data)
+    {
+        std::array<std::size_t, M> ki{};
+        for (std::size_t i = 0; i < M; ++i) {
+            ki[i] = data.slot_to_key[i];
+        }
+        return ki;
+    }
+} // namespace detail
+
+template <fixed_string... Keys>
+consteval auto make_constexpr_perfect_set() {
+    constexpr std::size_t N = sizeof...(Keys);
+    static_assert(N > 0, "make_constexpr_perfect_set requires at least one key");
+
+    constexpr std::array<std::string_view, N> keys{Keys.view()...};
+
+    // Validate no duplicates
+    for (std::size_t i = 0; i < N; ++i) {
+        for (std::size_t j = i + 1; j < N; ++j) {
+            if (keys[i] == keys[j]) {
+                throw "Duplicate key in make_constexpr_perfect_set";
+            }
+        }
+    }
+
+    constexpr auto data    = detail::compute_phf<N>(keys);
+    constexpr std::size_t M  = data.table_size;
+    constexpr std::size_t NP = data.num_positions;
+    constexpr auto Pos       = data.positions;
+    constexpr auto Asso      = data.asso_values;
+    constexpr auto HashKeys  = detail::build_hash_keys<M>(keys, data);
+    constexpr auto KeyIndex  = detail::build_key_index<M>(data);
+
+    return constexpr_perfect_hash_set<N, M, NP, Pos, Asso>{keys, KeyIndex, HashKeys};
 }
 
 // ============================================================================

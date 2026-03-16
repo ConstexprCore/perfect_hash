@@ -63,10 +63,17 @@ bool hash_is_special(std::string_view input) {
   return (target[0] == input[0]) && (target.substr(1) == input.substr(1));
 }
 
+bool fancy_is_set(std::string_view input) {
+  static constexpr auto proto_match =
+      ConstexprCore::make_constexpr_perfect_set<"http", "https", "ftp", "ws", "wss",
+                                      "file">();
+  return proto_match.contains(input);
+}
+
 void collect_benchmark_results(size_t number_strings) {
   std::vector<std::string_view> strings = populate(number_strings);
   constexpr auto proto_match =
-      ConstexprCore::make_perfect_set<"http", "https", "ftp", "ws", "wss",
+      ConstexprCore::make_constexpr_perfect_set<"http", "https", "ftp", "ws", "wss",
                                       "file">();
 
   for (const auto &str : strings) {
