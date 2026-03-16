@@ -51,6 +51,42 @@ std::optional<Method> parse_method(std::string_view s) {
 }
 ```
 
+### Constexpr perfect hash set
+
+```cpp
+#include <ConstexprCore/perfect_hash.h>
+
+using namespace ConstexprCore;
+
+constexpr auto methods = make_constexpr_perfect_set<"GET", "POST", "PUT", "DELETE", "PATCH">();
+
+bool is_valid_method(std::string_view s) {
+    return methods.contains(s);
+}
+```
+
+### Constexpr perfect hash map
+
+```cpp
+#include <ConstexprCore/perfect_hash.h>
+
+using namespace ConstexprCore;
+
+enum class Method { GET, POST, PUT, DELETE, PATCH };
+
+constexpr auto methods = make_constexpr_perfect_map<
+    kv<"GET",    Method::GET>,
+    kv<"POST",   Method::POST>,
+    kv<"PUT",    Method::PUT>,
+    kv<"DELETE", Method::DELETE>,
+    kv<"PATCH",  Method::PATCH>
+>();
+
+std::optional<Method> parse_method(std::string_view s) {
+    return methods.lookup(s);
+}
+```
+
 ## Building
 
 Requires a C++23 compiler and CMake 3.20+.

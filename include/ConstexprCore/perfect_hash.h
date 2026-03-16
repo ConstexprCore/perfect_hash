@@ -159,17 +159,55 @@ struct constexpr_perfect_hash_set {
         }
     }
 
+private:
+    template <std::size_t Slot>
+    [[nodiscard]] static constexpr bool compare_content(const char* p) noexcept {
+        constexpr auto& expected = Keys[Slot];
+        bool matches = true;
+        for (std::size_t i = 0; i < expected.length; ++i) {
+            matches &= (p[i] == expected.data[i]);
+        }
+        return matches;
+    }
+
+    static constexpr auto make_lengths() noexcept {
+        std::array<std::size_t, TableSize> lens{};
+        for (std::size_t i = 0; i < TableSize; ++i)
+            lens[i] = Keys[i].length;
+        return lens;
+    }
+
+    static constexpr auto lengths = make_lengths();
+
+    template <std::size_t... Is>
+    [[nodiscard]] inline __attribute__((always_inline)) constexpr bool contains_impl(std::string_view key, std::size_t slot, std::index_sequence<Is...>) const noexcept {
+        bool result = false;
+        (void)((slot == Is ? (result = compare_content<Is>(key.data()), true) : false) || ...);
+        return result;
+    }
+
+    template <std::size_t... Is>
+    [[nodiscard]] constexpr std::optional<std::size_t> index_of_impl(std::string_view key, std::size_t slot, std::index_sequence<Is...>) const noexcept {
+        std::optional<std::size_t> result = std::nullopt;
+        (void)((slot == Is ? (compare_content<Is>(key.data()) ? (result = KeyIndex[Is], true) : true) : false) || ...);
+        return result;
+    }
+
+public:
     [[nodiscard]] constexpr bool contains(std::string_view key) const noexcept {
         std::size_t slot = compute_hash(key);
-        return slot < TableSize && Keys[slot] == key;
+        if (slot >= TableSize || key.size() != lengths[slot]) return false;
+        return contains_impl(key, slot, std::make_index_sequence<TableSize>{});
     }
 
     [[nodiscard]] constexpr std::optional<std::size_t> index_of(std::string_view key) const noexcept {
         std::size_t slot = compute_hash(key);
-        if (slot < TableSize && Keys[slot] == key) {
-            return KeyIndex[slot];
-        }
-        return std::nullopt;
+        if (slot >= TableSize || key.size() != lengths[slot]) return std::nullopt;
+        return index_of_impl(key, slot, std::make_index_sequence<TableSize>{});
+    }
+
+    [[nodiscard]] constexpr std::optional<std::size_t> lookup(std::string_view key) const noexcept {
+        return index_of(key);
     }
 };
 
@@ -223,7 +261,175 @@ struct kv {
 };
 
 // ============================================================================
-// make_perfect_set
+// constexpr_perfect_hash_map
+// ============================================================================
+
+template <
+    std::size_t N,
+    typename ValueT,
+    std::size_t TableSize,
+    std::size_t NumPositions,
+    std::array<std::size_t, detail::MAX_POSITIONS> Positions,
+    std::array<std::size_t, 256> AssoValues,
+    std::size_t MaxKeyLen,
+    std::array<fixed_string_view<MaxKeyLen>, TableSize> Keys,
+    std::array<std::size_t, TableSize> KeyIndex,
+    std::array<ValueT, N> Values
+>
+struct constexpr_perfect_hash_map {
+    std::array<std::string_view, N> original_keys_;
+
+    consteval constexpr_perfect_hash_map(
+        const std::array<std::string_view, N>& keys)
+        : original_keys_{keys}
+    {}
+
+    [[nodiscard]] constexpr std::size_t size() const noexcept { return N; }
+
+    [[nodiscard]] constexpr std::size_t table_size() const noexcept { return TableSize; }
+
+    [[nodiscard]] constexpr std::string_view key_at(std::size_t i) const noexcept {
+        return original_keys_[i];
+    }
+
+    [[nodiscard]] constexpr std::size_t compute_hash(std::string_view key) const noexcept {
+        std::size_t h = key.size();
+        for (std::size_t i = 0; i < NumPositions; ++i) {
+            std::size_t ch = detail::char_at(key, Positions[i]);
+            if (ch < 256) {
+                h += AssoValues[ch];
+            }
+        }
+        if constexpr (detail::is_power_of_two(TableSize)) {
+            return h & (TableSize - 1);
+        } else {
+            return h % TableSize;
+        }
+    }
+
+private:
+    template <std::size_t Slot>
+    [[nodiscard]] static constexpr bool compare_content(const char* p) noexcept {
+        constexpr auto& expected = Keys[Slot];
+        bool matches = true;
+        for (std::size_t i = 0; i < expected.length; ++i) {
+            matches &= (p[i] == expected.data[i]);
+        }
+        return matches;
+    }
+
+    static constexpr auto make_lengths() noexcept {
+        std::array<std::size_t, TableSize> lens{};
+        for (std::size_t i = 0; i < TableSize; ++i)
+            lens[i] = Keys[i].length;
+        return lens;
+    }
+
+    static constexpr auto lengths = make_lengths();
+
+    template <std::size_t... Is>
+    [[nodiscard]] inline __attribute__((always_inline)) constexpr bool contains_impl(std::string_view key, std::size_t slot, std::index_sequence<Is...>) const noexcept {
+        bool result = false;
+        (void)((slot == Is ? (result = compare_content<Is>(key.data()), true) : false) || ...);
+        return result;
+    }
+
+    template <std::size_t... Is>
+    [[nodiscard]] constexpr std::optional<std::size_t> index_of_impl(std::string_view key, std::size_t slot, std::index_sequence<Is...>) const noexcept {
+        std::optional<std::size_t> result = std::nullopt;
+        (void)((slot == Is ? (compare_content<Is>(key.data()) ? (result = KeyIndex[Is], true) : true) : false) || ...);
+        return result;
+    }
+
+public:
+    [[nodiscard]] constexpr bool contains(std::string_view key) const noexcept {
+        std::size_t slot = compute_hash(key);
+        if (slot >= TableSize || key.size() != lengths[slot]) return false;
+        return contains_impl(key, slot, std::make_index_sequence<TableSize>{});
+    }
+
+    [[nodiscard]] constexpr std::optional<std::size_t> index_of(std::string_view key) const noexcept {
+        std::size_t slot = compute_hash(key);
+        if (slot >= TableSize || key.size() != lengths[slot]) return std::nullopt;
+        return index_of_impl(key, slot, std::make_index_sequence<TableSize>{});
+    }
+
+    [[nodiscard]] constexpr std::optional<ValueT> lookup(std::string_view key) const noexcept {
+        auto idx = index_of(key);
+        if (idx.has_value()) {
+            return Values[*idx];
+        }
+        return std::nullopt;
+    }
+};
+
+// ============================================================================
+// build_hash_keys / build_key_index helpers
+// ============================================================================
+
+template <std::size_t MaxLen, std::size_t M, auto N>
+consteval std::array<fixed_string_view<MaxLen>, M> build_hash_keys(
+    const std::array<std::string_view, N>& keys,
+    const detail::phf_result<N>& data)
+{
+    std::array<fixed_string_view<MaxLen>, M> hkeys{};
+    for (std::size_t i = 0; i < M; ++i) {
+        if (data.slot_to_key[i] != N) {
+            hkeys[i] = fixed_string_view<MaxLen>(keys[data.slot_to_key[i]]);
+        }
+    }
+    return hkeys;
+}
+
+template <std::size_t M, auto N>
+consteval std::array<std::size_t, M> build_key_index(const detail::phf_result<N>& data)
+{
+    std::array<std::size_t, M> ki{};
+    for (std::size_t i = 0; i < M; ++i) {
+        ki[i] = data.slot_to_key[i];
+    }
+    return ki;
+}
+
+// ============================================================================
+// make_constexpr_perfect_map
+// ============================================================================
+
+template <typename... KVs>
+consteval auto make_constexpr_perfect_map() {
+    constexpr std::size_t N = sizeof...(KVs);
+    static_assert(N > 0, "make_constexpr_perfect_map requires at least one entry");
+
+    constexpr std::array<std::string_view, N> keys{KVs::key...};
+
+    // Validate no duplicates
+    for (std::size_t i = 0; i < N; ++i) {
+        for (std::size_t j = i + 1; j < N; ++j) {
+            if (keys[i] == keys[j]) {
+                throw "Duplicate key in make_constexpr_perfect_map";
+            }
+        }
+    }
+
+    using first_kv = typename std::tuple_element<0, std::tuple<KVs...>>::type;
+    using ValueT = decltype(first_kv::value);
+
+    constexpr std::array<ValueT, N> values{static_cast<ValueT>(KVs::value)...};
+
+    constexpr auto data    = detail::compute_phf<N>(keys);
+    constexpr std::size_t M  = data.table_size;
+    static_assert(M > 0, "Failed to generate perfect hash function");
+    constexpr std::size_t NP = data.num_positions;
+    constexpr auto Pos       = data.positions;
+    constexpr auto Asso      = data.asso_values;
+    constexpr std::size_t MaxLen = detail::max_key_length(keys);
+    constexpr auto HashKeys  = build_hash_keys<MaxLen, data.table_size>(keys, data);
+    constexpr auto KeyIndex  = build_key_index<data.table_size>(data);
+
+    return constexpr_perfect_hash_map<N, ValueT, data.table_size, NP, Pos, Asso, MaxLen, HashKeys, KeyIndex, values>{keys};
+}
+
+// ============================================================================// make_perfect_set
 // ============================================================================
 
 template <fixed_string... Keys>
@@ -252,32 +458,6 @@ consteval auto make_perfect_set() {
 // make_constexpr_perfect_set
 // ============================================================================
 
-namespace detail {
-    template <std::size_t MaxLen, std::size_t M, std::size_t N>
-    consteval std::array<fixed_string_view<MaxLen>, M> build_hash_keys(
-        const std::array<std::string_view, N>& keys,
-        const phf_result<N>& data)
-    {
-        std::array<fixed_string_view<MaxLen>, M> hkeys{};
-        for (std::size_t i = 0; i < M; ++i) {
-            if (data.slot_to_key[i] != N) {
-                hkeys[i] = fixed_string_view<MaxLen>(keys[data.slot_to_key[i]]);
-            }
-        }
-        return hkeys;
-    }
-
-    template <std::size_t M, std::size_t N>
-    consteval std::array<std::size_t, M> build_key_index(const phf_result<N>& data)
-    {
-        std::array<std::size_t, M> ki{};
-        for (std::size_t i = 0; i < M; ++i) {
-            ki[i] = data.slot_to_key[i];
-        }
-        return ki;
-    }
-} // namespace detail
-
 template <fixed_string... Keys>
 consteval auto make_constexpr_perfect_set() {
     constexpr std::size_t N = sizeof...(Keys);
@@ -301,41 +481,10 @@ consteval auto make_constexpr_perfect_set() {
     constexpr auto Pos       = data.positions;
     constexpr auto Asso      = data.asso_values;
     constexpr std::size_t MaxLen = detail::max_key_length(keys);
-    constexpr auto HashKeys  = detail::build_hash_keys<MaxLen, M>(keys, data);
-    constexpr auto KeyIndex  = detail::build_key_index<M>(data);
+    constexpr auto HashKeys  = build_hash_keys<MaxLen, data.table_size>(keys, data);
+    constexpr auto KeyIndex  = build_key_index<data.table_size>(data);
 
-    return constexpr_perfect_hash_set<N, M, NP, Pos, Asso, MaxLen, HashKeys, KeyIndex>{keys};
-}
-
-// ============================================================================
-// make_perfect_map
-// ============================================================================
-
-template <typename... KVs>
-consteval auto make_perfect_map() {
-    constexpr std::size_t N = sizeof...(KVs);
-    static_assert(N > 0, "make_perfect_map requires at least one entry");
-
-    constexpr std::array<std::string_view, N> keys{KVs::key...};
-
-    // Validate no duplicates
-    for (std::size_t i = 0; i < N; ++i) {
-        for (std::size_t j = i + 1; j < N; ++j) {
-            if (keys[i] == keys[j]) {
-                throw "Duplicate key in make_perfect_map";
-            }
-        }
-    }
-
-    using first_kv = typename std::tuple_element<0, std::tuple<KVs...>>::type;
-    using ValueT = decltype(first_kv::value);
-
-    constexpr std::array<ValueT, N> values{static_cast<ValueT>(KVs::value)...};
-
-    // Compute PHF once (determines table size + all data)
-    constexpr auto data = detail::compute_phf<N>(keys);
-    constexpr std::size_t M = data.table_size;
-    return perfect_hash_map<N, ValueT, M>{keys, values, data};
+    return constexpr_perfect_hash_set<N, data.table_size, NP, Pos, Asso, MaxLen, HashKeys, KeyIndex>{keys};
 }
 
 } // namespace ConstexprCore
