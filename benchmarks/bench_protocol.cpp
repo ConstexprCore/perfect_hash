@@ -66,6 +66,7 @@ double pretty_print(const std::string &name, size_t num_values,
     std::print(" {:5.2f} i ", agg.fastest_instructions() / double(num_values));
     std::print(" {:5.2f} i/c ",
                agg.fastest_instructions() / double(agg.fastest_cycles()));
+    std::print(" {:5.2f} bm ", agg.fastest_branch_misses() / double(num_values));
   }
   std::print("\n");
   return double(num_values) / agg.fastest_elapsed_ns();

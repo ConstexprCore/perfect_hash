@@ -11,7 +11,7 @@ FetchContent_MakeAvailable(benchmark)
 FetchContent_Declare(
     counters
     GIT_REPOSITORY https://github.com/lemire/counters.git
-    GIT_TAG v2.4.0
+    GIT_TAG v3.0.0
 )
 FetchContent_MakeAvailable(counters)
 
