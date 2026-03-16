@@ -18,9 +18,11 @@ namespace ConstexprCore {
 
 template <std::size_t N, std::size_t TableSize = N, std::size_t MaxKeyLen = 64>
 struct perfect_hash_set {
+    static_assert(N <= 255, "N must be <= 255 for uint8_t key indices");
     static_assert(TableSize <= 255, "TableSize must be <= 255 for uint8_t asso_values");
     static_assert(MaxKeyLen >= 1 && MaxKeyLen < 255,
                   "MaxKeyLen must be in [1, 254] to reserve 0xFF as empty sentinel");
+    static_assert(detail::MAX_POSITIONS <= 255, "MAX_POSITIONS must fit in uint8_t");
 
     static constexpr std::uint8_t POS_LAST_CHAR = 255;
     static constexpr bool TABLE_SIZE_IS_POW2 = (TableSize & (TableSize - 1)) == 0;
@@ -244,7 +246,7 @@ consteval auto make_perfect_set() {
     // Compute PHF once (determines table size + all data)
     constexpr auto data = detail::compute_phf<N>(keys);
     constexpr std::size_t M = data.table_size;
-    constexpr std::size_t MaxLen = detail::max_key_length(keys);
+    constexpr std::size_t MaxLen = detail::max_key_length(keys) > 0 ? detail::max_key_length(keys) : 1;
     return perfect_hash_set<N, M, MaxLen>{keys, data};
 }
 
@@ -276,7 +278,7 @@ consteval auto make_perfect_map() {
     // Compute PHF once (determines table size + all data)
     constexpr auto data = detail::compute_phf<N>(keys);
     constexpr std::size_t M = data.table_size;
-    constexpr std::size_t MaxLen = detail::max_key_length(keys);
+    constexpr std::size_t MaxLen = detail::max_key_length(keys) > 0 ? detail::max_key_length(keys) : 1;
     return perfect_hash_map<N, ValueT, M, MaxLen>{keys, values, data};
 }
 
