@@ -250,16 +250,28 @@ void collect_benchmark_results(size_t number_strings) {
   pretty_print("naive", number_strings, counters::bench(count_naive));
 
   // === Shuffled order ===
-  // Each invocation shuffles before iterating, so the branch predictor
-  // can't memorize the sequence across calls.  This is closer to
-  // real-world workloads where lookup order is not repeatable.
+  // Pre-generate many shuffled copies of the input vector so each benchmark
+  // iteration sees a different order.  This defeats the branch predictor
+  // (which would otherwise memorize a single repeating sequence) without
+  // including shuffle overhead in the measurement.
   std::println("\n=== Shuffled order (defeats branch predictor) ===");
+  constexpr size_t NUM_SHUFFLES = 128;
+  std::vector<std::vector<std::string_view>> shuffled(NUM_SHUFFLES);
+  {
+    std::mt19937 rng(42);
+    for (size_t i = 0; i < NUM_SHUFFLES; ++i) {
+      shuffled[i] = strings;
+      std::shuffle(shuffled[i].begin(), shuffled[i].end(), rng);
+    }
+  }
 
-  std::mt19937 rng0(42);
-  auto count_auto_map_shuf = [&strings, &counter, &rng0]() {
-    std::shuffle(strings.begin(), strings.end(), rng0);
+  size_t si = 0;  // shared iteration counter — reset before each benchmark
+
+  si = 0;
+  auto count_auto_map_shuf = [&shuffled, &si, &counter]() {
+    const auto& s = shuffled[si++ & (NUM_SHUFFLES - 1)];
     size_t c = 0;
-    for (const auto &str : strings) {
+    for (const auto &str : s) {
       if (auto opt = auto_map.lookup(str); opt) {
         c += static_cast<int>(*opt);
       }
@@ -269,11 +281,11 @@ void collect_benchmark_results(size_t number_strings) {
   pretty_print("make_perfect_map (shuffled)", number_strings,
                counters::bench(count_auto_map_shuf));
 
-  std::mt19937 rng1(42);
-  auto count_ours_shuf = [&strings, &counter, &methods, &rng1]() {
-    std::shuffle(strings.begin(), strings.end(), rng1);
+  si = 0;
+  auto count_ours_shuf = [&shuffled, &si, &counter, &methods]() {
+    const auto& s = shuffled[si++ & (NUM_SHUFFLES - 1)];
     size_t c = 0;
-    for (const auto &str : strings) {
+    for (const auto &str : s) {
       if (auto opt = methods.lookup(str); opt) {
         c += static_cast<int>(*opt);
       }
@@ -283,11 +295,11 @@ void collect_benchmark_results(size_t number_strings) {
   pretty_print("constexpr_perfect_map (shuffled)", number_strings,
                counters::bench(count_ours_shuf));
 
-  std::mt19937 rng2(42);
-  auto count_runtime_map_shuf = [&strings, &counter, &rng2]() {
-    std::shuffle(strings.begin(), strings.end(), rng2);
+  si = 0;
+  auto count_runtime_map_shuf = [&shuffled, &si, &counter]() {
+    const auto& s = shuffled[si++ & (NUM_SHUFFLES - 1)];
     size_t c = 0;
-    for (const auto &str : strings) {
+    for (const auto &str : s) {
       if (auto opt = runtime_map.lookup(str); opt) {
         c += static_cast<int>(*opt);
       }
@@ -297,11 +309,11 @@ void collect_benchmark_results(size_t number_strings) {
   pretty_print("perfect_hash_map (shuffled)", number_strings,
                counters::bench(count_runtime_map_shuf));
 
-  std::mt19937 rng3(42);
-  auto count_classic_shuf = [&strings, &counter, &rng3]() {
-    std::shuffle(strings.begin(), strings.end(), rng3);
+  si = 0;
+  auto count_classic_shuf = [&shuffled, &si, &counter]() {
+    const auto& s = shuffled[si++ & (NUM_SHUFFLES - 1)];
     size_t c = 0;
-    for (const auto &str : strings) {
+    for (const auto &str : s) {
       auto type = get_scheme_type(str);
       if (type != SchemeType::NOT_SPECIAL) {
         c += static_cast<int>(type);
@@ -312,11 +324,11 @@ void collect_benchmark_results(size_t number_strings) {
   pretty_print("hand-tuned hash (shuffled)", number_strings,
                counters::bench(count_classic_shuf));
 
-  std::mt19937 rng4(42);
-  auto count_std_map_shuf = [&strings, &counter, &rng4]() {
-    std::shuffle(strings.begin(), strings.end(), rng4);
+  si = 0;
+  auto count_std_map_shuf = [&shuffled, &si, &counter]() {
+    const auto& s = shuffled[si++ & (NUM_SHUFFLES - 1)];
     size_t c = 0;
-    for (const auto &str : strings) {
+    for (const auto &str : s) {
       auto it = std_map.find(str);
       if (it != std_map.end()) {
         c += static_cast<int>(it->second);
@@ -327,11 +339,11 @@ void collect_benchmark_results(size_t number_strings) {
   pretty_print("std::map (shuffled)", number_strings,
                counters::bench(count_std_map_shuf));
 
-  std::mt19937 rng5(42);
-  auto count_unordered_map_shuf = [&strings, &counter, &rng5]() {
-    std::shuffle(strings.begin(), strings.end(), rng5);
+  si = 0;
+  auto count_unordered_map_shuf = [&shuffled, &si, &counter]() {
+    const auto& s = shuffled[si++ & (NUM_SHUFFLES - 1)];
     size_t c = 0;
-    for (const auto &str : strings) {
+    for (const auto &str : s) {
       auto it = unordered_map.find(str);
       if (it != unordered_map.end()) {
         c += static_cast<int>(it->second);
@@ -342,11 +354,11 @@ void collect_benchmark_results(size_t number_strings) {
   pretty_print("std::unordered_map (shuffled)", number_strings,
                counters::bench(count_unordered_map_shuf));
 
-  std::mt19937 rng6(42);
-  auto count_naive_shuf = [&strings, &counter, &rng6]() {
-    std::shuffle(strings.begin(), strings.end(), rng6);
+  si = 0;
+  auto count_naive_shuf = [&shuffled, &si, &counter]() {
+    const auto& s = shuffled[si++ & (NUM_SHUFFLES - 1)];
     size_t c = 0;
-    for (const auto &str : strings) {
+    for (const auto &str : s) {
       if (str == "http") c += static_cast<int>(SchemeType::HTTP);
       else if (str == "https") c += static_cast<int>(SchemeType::HTTPS);
       else if (str == "ftp") c += static_cast<int>(SchemeType::FTP);
