@@ -151,9 +151,29 @@ void collect_benchmark_results(size_t number_strings) {
 
   static constexpr std::array<std::string_view, 6> keys = {"http", "https", "ftp", "ws", "wss", "file"};
   static constexpr std::array<SchemeType, 6> values = {SchemeType::HTTP, SchemeType::HTTPS, SchemeType::FTP, SchemeType::WS, SchemeType::WSS, SchemeType::FILE};
-  static constexpr auto runtime_map = ConstexprCore::perfect_hash_map<6, SchemeType>{keys, values};
+  static constexpr auto runtime_map = ConstexprCore::perfect_hash_map<6, SchemeType, 8, 5>{keys, values};
+
+  // This is the user-facing API — no explicit template params needed
+  static constexpr auto auto_map = ConstexprCore::make_perfect_map<
+      ConstexprCore::kv<"http", SchemeType::HTTP>,
+      ConstexprCore::kv<"https", SchemeType::HTTPS>,
+      ConstexprCore::kv<"ftp", SchemeType::FTP>,
+      ConstexprCore::kv<"ws", SchemeType::WS>,
+      ConstexprCore::kv<"wss", SchemeType::WSS>,
+      ConstexprCore::kv<"file", SchemeType::FILE>>();
 
   volatile uint64_t counter = 0;
+
+  auto count_auto_map = [&strings, &counter]() {
+    size_t c = 0;
+    for (const auto &str : strings) {
+      if (auto opt = auto_map.lookup(str); opt) {
+        c += static_cast<int>(*opt);
+      }
+    }
+    counter += c;
+  };
+  pretty_print("make_perfect_map", number_strings, counters::bench(count_auto_map));
 
   auto count_ours = [&strings, &counter, &methods]() {
     size_t c = 0;
@@ -228,6 +248,116 @@ void collect_benchmark_results(size_t number_strings) {
     counter += c;
   };
   pretty_print("naive", number_strings, counters::bench(count_naive));
+
+  // === Shuffled order ===
+  // Each invocation shuffles before iterating, so the branch predictor
+  // can't memorize the sequence across calls.  This is closer to
+  // real-world workloads where lookup order is not repeatable.
+  std::println("\n=== Shuffled order (defeats branch predictor) ===");
+
+  std::mt19937 rng0(42);
+  auto count_auto_map_shuf = [&strings, &counter, &rng0]() {
+    std::shuffle(strings.begin(), strings.end(), rng0);
+    size_t c = 0;
+    for (const auto &str : strings) {
+      if (auto opt = auto_map.lookup(str); opt) {
+        c += static_cast<int>(*opt);
+      }
+    }
+    counter += c;
+  };
+  pretty_print("make_perfect_map (shuffled)", number_strings,
+               counters::bench(count_auto_map_shuf));
+
+  std::mt19937 rng1(42);
+  auto count_ours_shuf = [&strings, &counter, &methods, &rng1]() {
+    std::shuffle(strings.begin(), strings.end(), rng1);
+    size_t c = 0;
+    for (const auto &str : strings) {
+      if (auto opt = methods.lookup(str); opt) {
+        c += static_cast<int>(*opt);
+      }
+    }
+    counter += c;
+  };
+  pretty_print("constexpr_perfect_map (shuffled)", number_strings,
+               counters::bench(count_ours_shuf));
+
+  std::mt19937 rng2(42);
+  auto count_runtime_map_shuf = [&strings, &counter, &rng2]() {
+    std::shuffle(strings.begin(), strings.end(), rng2);
+    size_t c = 0;
+    for (const auto &str : strings) {
+      if (auto opt = runtime_map.lookup(str); opt) {
+        c += static_cast<int>(*opt);
+      }
+    }
+    counter += c;
+  };
+  pretty_print("perfect_hash_map (shuffled)", number_strings,
+               counters::bench(count_runtime_map_shuf));
+
+  std::mt19937 rng3(42);
+  auto count_classic_shuf = [&strings, &counter, &rng3]() {
+    std::shuffle(strings.begin(), strings.end(), rng3);
+    size_t c = 0;
+    for (const auto &str : strings) {
+      auto type = get_scheme_type(str);
+      if (type != SchemeType::NOT_SPECIAL) {
+        c += static_cast<int>(type);
+      }
+    }
+    counter += c;
+  };
+  pretty_print("hand-tuned hash (shuffled)", number_strings,
+               counters::bench(count_classic_shuf));
+
+  std::mt19937 rng4(42);
+  auto count_std_map_shuf = [&strings, &counter, &rng4]() {
+    std::shuffle(strings.begin(), strings.end(), rng4);
+    size_t c = 0;
+    for (const auto &str : strings) {
+      auto it = std_map.find(str);
+      if (it != std_map.end()) {
+        c += static_cast<int>(it->second);
+      }
+    }
+    counter += c;
+  };
+  pretty_print("std::map (shuffled)", number_strings,
+               counters::bench(count_std_map_shuf));
+
+  std::mt19937 rng5(42);
+  auto count_unordered_map_shuf = [&strings, &counter, &rng5]() {
+    std::shuffle(strings.begin(), strings.end(), rng5);
+    size_t c = 0;
+    for (const auto &str : strings) {
+      auto it = unordered_map.find(str);
+      if (it != unordered_map.end()) {
+        c += static_cast<int>(it->second);
+      }
+    }
+    counter += c;
+  };
+  pretty_print("std::unordered_map (shuffled)", number_strings,
+               counters::bench(count_unordered_map_shuf));
+
+  std::mt19937 rng6(42);
+  auto count_naive_shuf = [&strings, &counter, &rng6]() {
+    std::shuffle(strings.begin(), strings.end(), rng6);
+    size_t c = 0;
+    for (const auto &str : strings) {
+      if (str == "http") c += static_cast<int>(SchemeType::HTTP);
+      else if (str == "https") c += static_cast<int>(SchemeType::HTTPS);
+      else if (str == "ftp") c += static_cast<int>(SchemeType::FTP);
+      else if (str == "ws") c += static_cast<int>(SchemeType::WS);
+      else if (str == "wss") c += static_cast<int>(SchemeType::WSS);
+      else if (str == "file") c += static_cast<int>(SchemeType::FILE);
+    }
+    counter += c;
+  };
+  pretty_print("naive (shuffled)", number_strings,
+               counters::bench(count_naive_shuf));
 }
 
 int main(int argc, char **argv) { collect_benchmark_results(20000); }
