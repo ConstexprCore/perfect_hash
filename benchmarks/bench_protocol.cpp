@@ -206,7 +206,7 @@ void collect_benchmark_results(size_t number_strings) {
       }
     }
   };
-  pretty_print("perfect_hash_map", number_strings, counters::bench(count_runtime_map));
+  pretty_print("make_perfect_map", number_strings, counters::bench(count_runtime_map));
   auto count_classic = [&strings, &expected_types]() {
     for (size_t i = 0; i < strings.size(); i++) {
       auto type = get_scheme_type(strings[i]);
@@ -287,7 +287,7 @@ void collect_benchmark_results(size_t number_strings) {
       }
     }
   };
-  pretty_print("perfect_hash_map (shuffled)", number_strings, counters::bench(count_runtime_map_shuf));
+  pretty_print("make_perfect_map (shuffled)", number_strings, counters::bench(count_runtime_map_shuf));
 
   si = 0;
   auto count_classic_shuf = [&shuffled, &si, &expected_types]() {
