@@ -20,21 +20,20 @@ add_executable(bench_protocol
     bench_protocol.cpp
 )
 
-add_executable(phf_benchmarks
-    bench_lookup.cpp
-)
-
-
 target_link_libraries(bench_protocol PRIVATE
     ConstexprCore::perfect_hash
     counters::counters
 )
 
-target_link_libraries(phf_benchmarks PRIVATE
-    ConstexprCore::perfect_hash
-    benchmark::benchmark
-    benchmark::benchmark_main
-)
+# bench_lookup requires gperf .inc files; only build if they exist
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/http_methods_gperf.inc")
+    add_executable(phf_benchmarks bench_lookup.cpp)
+    target_link_libraries(phf_benchmarks PRIVATE
+        ConstexprCore::perfect_hash
+        benchmark::benchmark
+        benchmark::benchmark_main
+    )
+endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     message(WARNING "Building benchmarks in debug mode may affect performance measurements.")
