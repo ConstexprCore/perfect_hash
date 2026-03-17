@@ -16,7 +16,6 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
-
 #include "ConstexprCore/perfect_hash.h"
 
 #include "counters/bench.h"
@@ -73,7 +72,7 @@ double pretty_print(const std::string &name, size_t num_values,
 }
 
 std::vector<std::string_view> populate(size_t length) {
-  std::mt19937 gen;
+  std::mt19937_64 gen(std::random_device{}());
   // we generate a distribution where http is more common
   std::discrete_distribution<> d({20, 10, 10, 5, 5, 5});
   const static std::string_view options[] = {
@@ -107,9 +106,29 @@ SchemeType fancy_get_scheme_type(std::string_view input) {
   return result.value_or(SchemeType::NOT_SPECIAL);
 }
 
+
+std::optional<SchemeType> get_scheme_type_naive(std::string_view input) {
+  if (input == "http") return SchemeType::HTTP;
+  else if (input == "https") return SchemeType::HTTPS;
+  else if (input == "ftp") return SchemeType::FTP;
+  else if (input == "ws") return SchemeType::WS;
+  else if (input == "wss") return SchemeType::WSS;
+  else if (input == "file") return SchemeType::FILE;
+  else return std::nullopt;
+}
+
 void collect_benchmark_results(size_t number_strings) {
   std::vector<std::string_view> strings = populate(number_strings);
+  std::vector<SchemeType> expected_types(strings.size());
   constexpr auto methods = ConstexprCore::make_constexpr_perfect_map<
+      ConstexprCore::kv<"http", SchemeType::HTTP>,
+      ConstexprCore::kv<"https", SchemeType::HTTPS>,
+      ConstexprCore::kv<"ftp", SchemeType::FTP>,
+      ConstexprCore::kv<"ws", SchemeType::WS>,
+      ConstexprCore::kv<"wss", SchemeType::WSS>,
+      ConstexprCore::kv<"file", SchemeType::FILE>
+  >();
+  static constexpr auto runtime_map = ConstexprCore::make_perfect_map<
       ConstexprCore::kv<"http", SchemeType::HTTP>,
       ConstexprCore::kv<"https", SchemeType::HTTPS>,
       ConstexprCore::kv<"ftp", SchemeType::FTP>,
@@ -127,6 +146,17 @@ void collect_benchmark_results(size_t number_strings) {
                 << "'\n";
       std::cerr << "Expected: " << is_special << ", Got: " << is_special_phf
                 << "\n";
+      std::exit(1);
+    }
+    auto naive_result = get_scheme_type_naive(str);
+    auto phf_result = methods.lookup(str);
+    if (naive_result != phf_result) {
+      std::cerr << "Mismatch between naive and PHF for input: '" << str << "'\n";
+      std::exit(1);
+    }
+    auto runtime_result = runtime_map.lookup(str);
+    if (naive_result != runtime_result) {
+      std::cerr << "Mismatch between naive and runtime_map for input: '" << str << "'\n";
       std::exit(1);
     }
   }
@@ -149,85 +179,66 @@ void collect_benchmark_results(size_t number_strings) {
       {"file", SchemeType::FILE}
   };
 
-  static constexpr std::array<std::string_view, 6> keys = {"http", "https", "ftp", "ws", "wss", "file"};
-  static constexpr std::array<SchemeType, 6> values = {SchemeType::HTTP, SchemeType::HTTPS, SchemeType::FTP, SchemeType::WS, SchemeType::WSS, SchemeType::FILE};
-  static constexpr auto runtime_map = ConstexprCore::perfect_hash_map<6, SchemeType>{keys, values};
 
-  volatile uint64_t counter = 0;
-
-  auto count_ours = [&strings, &counter, &methods]() {
-    size_t c = 0;
-
-    for (const auto &str : strings) {
-      if (auto opt = methods.lookup(str); opt) {
-        c += static_cast<int>(*opt);
+  auto count_naive = [&strings, &expected_types]() {
+    for(size_t i = 0; i < strings.size(); i++) {
+      auto opt = get_scheme_type_naive(strings[i]);
+      if (opt) {
+        expected_types[i] = *opt;
       }
     }
-    counter += c;
+  };
+  pretty_print("naive", number_strings, counters::bench(count_naive));
+
+  auto count_ours = [&strings, &expected_types, &methods]() {
+    for (size_t i = 0; i < strings.size(); i++) {
+      if (auto opt = methods.lookup(strings[i]); opt) {
+        expected_types[i] = *opt;
+      }
+    }
   };
   pretty_print("constexpr_perfect_map", number_strings, counters::bench(count_ours));
 
-  auto count_runtime_map = [&strings, &counter]() {
-    size_t c = 0;
-    for (const auto &str : strings) {
-      if (auto opt = runtime_map.lookup(str); opt) {
-        c += static_cast<int>(*opt);
+  auto count_runtime_map = [&strings, &expected_types]() {
+    for (size_t i = 0; i < strings.size(); i++) {
+      if (auto opt = runtime_map.lookup(strings[i]); opt) {
+        expected_types[i] = *opt;
       }
     }
-    counter += c;
   };
   pretty_print("perfect_hash_map", number_strings, counters::bench(count_runtime_map));
-  auto count_classic = [&strings, &counter]() {
-    size_t c = 0;
-    for (const auto &str : strings) {
-      auto type = get_scheme_type(str);
+  auto count_classic = [&strings, &expected_types]() {
+    for (size_t i = 0; i < strings.size(); i++) {
+      auto type = get_scheme_type(strings[i]);
       if (type != SchemeType::NOT_SPECIAL) {
-        c += static_cast<int>(type);
+        expected_types[i] = type;
       }
     }
-    counter += c;
   };
 
   pretty_print("hand-tuned hash", number_strings, counters::bench(count_classic));
 
-  auto count_std_map = [&strings, &counter]() {
-    size_t c = 0;
-    for (const auto &str : strings) {
-      auto it = std_map.find(str);
+  auto count_std_map = [&strings, &expected_types]() {
+    for (size_t i = 0; i < strings.size(); i++) {
+      auto it = std_map.find(strings[i]);
       if (it != std_map.end()) {
-        c += static_cast<int>(it->second);
+        expected_types[i] = it->second;
       }
     }
-    counter += c;
   };
   pretty_print("std::map", number_strings, counters::bench(count_std_map));
 
-  auto count_unordered_map = [&strings, &counter]() {
-    size_t c = 0;
-    for (const auto &str : strings) {
-      auto it = unordered_map.find(str);
+  auto count_unordered_map = [&strings, &expected_types]() {
+    for (size_t i = 0; i < strings.size(); i++) {
+      auto it = unordered_map.find(strings[i]);
       if (it != unordered_map.end()) {
-        c += static_cast<int>(it->second);
+        expected_types[i] = it->second;
       }
     }
-    counter += c;
   };
   pretty_print("std::unordered_map", number_strings, counters::bench(count_unordered_map));
 
 
-  auto count_naive = [&strings, &counter]() {
-    size_t c = 0;
-    for (const auto &str : strings) {
-      if (str == "http") c += static_cast<int>(SchemeType::HTTP);
-      else if (str == "https") c += static_cast<int>(SchemeType::HTTPS);
-      else if (str == "ftp") c += static_cast<int>(SchemeType::FTP);
-      else if (str == "ws") c += static_cast<int>(SchemeType::WS);
-      else if (str == "wss") c += static_cast<int>(SchemeType::WSS);
-      else if (str == "file") c += static_cast<int>(SchemeType::FILE);
-    }
-    counter += c;
-  };
-  pretty_print("naive", number_strings, counters::bench(count_naive));
 }
 
 int main(int argc, char **argv) { collect_benchmark_results(20000); }
