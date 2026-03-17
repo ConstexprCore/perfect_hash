@@ -241,4 +241,10 @@ void collect_benchmark_results(size_t number_strings) {
 
 }
 
-int main(int argc, char **argv) { collect_benchmark_results(20000); }
+int main(int argc, char **argv) { 
+  if (!counters::has_performance_counters()) {
+    std::print("Performance counters not available, you may need to run with sudo.\n");
+  }
+  collect_benchmark_results(20000); 
+  return EXIT_SUCCESS;
+}

@@ -109,8 +109,35 @@ ctest --test-dir build --output-on-failure
 ```bash
 cmake -B build -DPH_BUILD_BENCHMARKS=ON
 cmake --build build
-./build/benchmarks/phf_benchmarks
+./build/benchmarks/phf_bench
 ```
+
+#### Benchmark design
+
+The benchmark suite compares four lookup strategies across key sets of increasing size:
+
+| Key set | N | Notes |
+|---|---|---|
+| Booleans | 2 | Tiny set |
+| RGB colors | 3 | Small set |
+| Protocols | 5 | Short prefixes |
+| HTTP methods | 7 | Typical use case |
+| C++ keywords | 15 | Medium set |
+| Letters a-z | 26 | All same length — stresses asso_values |
+| HTTP headers | 50 | Realistic large set |
+
+Each key set is tested with three query mixes (positive-only, negative-only, 50/50 mixed) against:
+
+- **PHF** — this library's `perfect_hash_set::contains()`
+- **gperf** — GNU `gperf`-generated lookup (where applicable)
+- **`std::unordered_set`** — stdlib hash table
+- **Binary search** — `std::binary_search` over a sorted array
+
+The gperf `.inc` baselines are pre-generated from the `.gperf` input files in `benchmarks/` using `gperf <file>.gperf > <file>_gperf.inc`.
+
+#### Preventing constant-folding
+
+Because PHF objects and key arrays are `constexpr`, the compiler can resolve every lookup at compile time if not careful. The benchmarks use `benchmark::DoNotOptimize(key)` on each key *before* the lookup call, which forces the compiler to treat the key as potentially modified and prevents it from constant-folding the result.
 
 ## Dependencies
 

@@ -8,6 +8,7 @@
 #include <optional>
 #include <tuple>
 #include <cstddef>
+#include <cstdint>
 
 namespace ConstexprCore {
 
@@ -15,49 +16,110 @@ namespace ConstexprCore {
 // perfect_hash_set
 // ============================================================================
 
-template <std::size_t N, std::size_t TableSize = N>
+template <std::size_t N, std::size_t TableSize = N, std::size_t MaxKeyLen = 64>
 struct perfect_hash_set {
-    std::array<std::size_t, 256> asso_values_{};
-    std::size_t num_positions_{};
-    std::array<std::size_t, detail::MAX_POSITIONS> positions_{};
-    std::array<std::size_t, TableSize> key_index_{};   // hash_slot -> declaration-order index
-    std::array<std::string_view, N> original_keys_;  // keys in declaration order
-    std::array<std::string_view, TableSize> keys_;  // keys in hash order, empty slots are empty string_view
+    static_assert(N <= 255, "N must be <= 255 for uint8_t key indices");
+    static_assert(TableSize <= 255, "TableSize must be <= 255 for uint8_t asso_values");
+    static_assert(MaxKeyLen >= 1 && MaxKeyLen < 255,
+                  "MaxKeyLen must be in [1, 254] to reserve 0xFF as empty sentinel");
+    static_assert(detail::MAX_POSITIONS <= 255, "MAX_POSITIONS must fit in uint8_t");
 
-    // Direct constructor: runs full PHF generation.
-    consteval perfect_hash_set(const std::array<std::string_view, N>& keys)
-        : original_keys_{keys}
-    {
-        std::array<std::size_t, TableSize> temp_slot_to_key{};
-        detail::generate_gperf<N, TableSize>(keys, asso_values_, num_positions_, positions_, temp_slot_to_key);
-        // Populate keys_ and key_index_
-        for (std::size_t i = 0; i < TableSize; ++i) {
-            key_index_[i] = temp_slot_to_key[i];
-            if (temp_slot_to_key[i] != N) {
-                keys_[i] = original_keys_[temp_slot_to_key[i]];
-            } else {
-                keys_[i] = std::string_view{};
+    static constexpr std::uint8_t POS_LAST_CHAR = 255;
+    static constexpr bool TABLE_SIZE_IS_POW2 = (TableSize & (TableSize - 1)) == 0;
+
+    // --- hot data (accessed every lookup) ---
+    std::array<std::uint8_t, 256> asso_values_{};
+    std::uint8_t num_positions_{};
+    std::array<std::uint8_t, detail::MAX_POSITIONS> positions_{};
+    std::uint8_t min_key_len_{};
+    std::array<std::uint8_t, TableSize> slot_key_len_{};                    // key length (0xFF = empty)
+    std::array<std::array<char, MaxKeyLen>, TableSize> slot_key_data_{};    // inline key bytes
+
+    // --- cold data (rarely accessed) ---
+    std::array<std::uint8_t, TableSize> slot_to_key_{};     // hash_slot -> declaration-order index
+    std::array<std::uint8_t, N> key_to_slot_{};             // declaration-order index -> slot
+
+    // Shared init logic for both constructors.
+    consteval void init_inline_data_(const std::array<std::string_view, N>& keys) {
+        // Compute min key length
+        std::size_t mn = keys[0].size();
+        for (std::size_t i = 1; i < N; ++i)
+            if (keys[i].size() < mn) mn = keys[i].size();
+        min_key_len_ = static_cast<std::uint8_t>(mn);
+
+        // Populate inline key data (0xFF = empty sentinel)
+        for (std::size_t s = 0; s < TableSize; ++s)
+            slot_key_len_[s] = 0xFF;
+        for (std::size_t s = 0; s < TableSize; ++s) {
+            if (slot_to_key_[s] < N) {
+                auto k = keys[slot_to_key_[s]];
+                slot_key_len_[s] = static_cast<std::uint8_t>(k.size());
+                for (std::size_t c = 0; c < k.size(); ++c)
+                    slot_key_data_[s][c] = k[c];
+                key_to_slot_[slot_to_key_[s]] = static_cast<std::uint8_t>(s);
             }
         }
+    }
+
+    // Direct constructor: runs full PHF generation.
+    consteval perfect_hash_set(const std::array<std::string_view, N>& keys) {
+        for (std::size_t i = 0; i < N; ++i) {
+            if (keys[i].size() > MaxKeyLen)
+                throw "Key length exceeds MaxKeyLen";
+        }
+
+        std::array<std::size_t, 256> full_asso{};
+        std::size_t wide_num_positions{};
+        std::array<std::size_t, detail::MAX_POSITIONS> wide_positions{};
+        std::array<std::size_t, TableSize> wide_slot_to_key{};
+        detail::generate_gperf<N, TableSize>(keys, full_asso, wide_num_positions, wide_positions, wide_slot_to_key);
+
+        for (std::size_t i = 0; i < 256; ++i)
+            asso_values_[i] = static_cast<std::uint8_t>(full_asso[i] % TableSize);
+        num_positions_ = static_cast<std::uint8_t>(wide_num_positions);
+        for (std::size_t i = 0; i < wide_num_positions; ++i)
+            positions_[i] = (wide_positions[i] == detail::LAST_CHAR)
+                ? POS_LAST_CHAR
+                : static_cast<std::uint8_t>(wide_positions[i]);
+        for (std::size_t i = 0; i < TableSize; ++i)
+            slot_to_key_[i] = static_cast<std::uint8_t>(wide_slot_to_key[i]);
+
+        // Verify the reduction didn't break the perfect hash
+        for (std::size_t i = 0; i < N; ++i) {
+            if (slot_to_key_[compute_hash(keys[i])] != i)
+                throw "asso_value reduction broke perfect hash mapping";
+        }
+
+        init_inline_data_(keys);
     }
 
     // Pre-computed constructor: copies data from a phf_result (no recomputation).
     consteval perfect_hash_set(
         const std::array<std::string_view, N>& keys,
         const detail::phf_result<N>& data)
-        : asso_values_{data.asso_values}
-        , num_positions_{data.num_positions}
-        , positions_{data.positions}
-        , original_keys_{keys}
     {
-        for (std::size_t i = 0; i < TableSize; ++i) {
-            key_index_[i] = data.slot_to_key[i];
-            if (data.slot_to_key[i] != N) {
-                keys_[i] = original_keys_[data.slot_to_key[i]];
-            } else {
-                keys_[i] = std::string_view{};
-            }
+        for (std::size_t i = 0; i < N; ++i) {
+            if (keys[i].size() > MaxKeyLen)
+                throw "Key length exceeds MaxKeyLen";
         }
+
+        for (std::size_t i = 0; i < 256; ++i)
+            asso_values_[i] = static_cast<std::uint8_t>(data.asso_values[i] % TableSize);
+        num_positions_ = static_cast<std::uint8_t>(data.num_positions);
+        for (std::size_t i = 0; i < data.num_positions; ++i)
+            positions_[i] = (data.positions[i] == detail::LAST_CHAR)
+                ? POS_LAST_CHAR
+                : static_cast<std::uint8_t>(data.positions[i]);
+        for (std::size_t i = 0; i < TableSize; ++i)
+            slot_to_key_[i] = static_cast<std::uint8_t>(data.slot_to_key[i]);
+
+        // Verify the reduction didn't break the perfect hash
+        for (std::size_t i = 0; i < N; ++i) {
+            if (slot_to_key_[compute_hash(keys[i])] != i)
+                throw "asso_value reduction broke perfect hash mapping";
+        }
+
+        init_inline_data_(keys);
     }
 
     [[nodiscard]] constexpr std::size_t size() const noexcept { return N; }
@@ -65,30 +127,50 @@ struct perfect_hash_set {
     [[nodiscard]] constexpr std::size_t table_size() const noexcept { return TableSize; }
 
     [[nodiscard]] constexpr std::string_view key_at(std::size_t i) const noexcept {
-        return original_keys_[i];
+        std::uint8_t slot = key_to_slot_[i];
+        return std::string_view(slot_key_data_[slot].data(), slot_key_len_[slot]);
     }
 
     [[nodiscard]] constexpr bool contains(std::string_view key) const noexcept {
-        return index_of(key).has_value();
+        auto len = key.size();
+        if (len < min_key_len_ || len > MaxKeyLen) return false;
+        std::size_t slot = compute_hash(key);
+        if (slot_key_len_[slot] != static_cast<std::uint8_t>(len)) return false;
+        const char* a = slot_key_data_[slot].data();
+        const char* b = key.data();
+        for (std::size_t i = 0; i < len; ++i)
+            if (a[i] != b[i]) return false;
+        return true;
     }
 
     [[nodiscard]] constexpr std::size_t compute_hash(std::string_view key) const noexcept {
         std::size_t h = key.size();
-        for (std::size_t i = 0; i < num_positions_; ++i) {
-            std::size_t ch = detail::char_at(key, positions_[i]);
-            if (ch < 256) {
-                h += asso_values_[ch];
+        for (std::uint8_t i = 0; i < num_positions_; ++i) {
+            std::uint8_t pos = positions_[i];
+            std::size_t ch;
+            if (pos == POS_LAST_CHAR) {
+                ch = key.empty() ? 256 : static_cast<unsigned char>(key.back());
+            } else {
+                ch = (pos < key.size()) ? static_cast<unsigned char>(key[pos]) : 256;
             }
+            if (ch < 256) h += asso_values_[ch];
         }
-        return h % TableSize;
+        if constexpr (TABLE_SIZE_IS_POW2)
+            return h & (TableSize - 1);
+        else
+            return h % TableSize;
     }
 
     [[nodiscard]] constexpr std::optional<std::size_t> index_of(std::string_view key) const noexcept {
+        auto len = key.size();
+        if (len < min_key_len_ || len > MaxKeyLen) return std::nullopt;
         std::size_t slot = compute_hash(key);
-        if (slot < TableSize && key_index_[slot] < N && keys_[slot] == key) {
-            return key_index_[slot];
-        }
-        return std::nullopt;
+        if (slot_key_len_[slot] != static_cast<std::uint8_t>(len)) return std::nullopt;
+        const char* a = slot_key_data_[slot].data();
+        const char* b = key.data();
+        for (std::size_t i = 0; i < len; ++i)
+            if (a[i] != b[i]) return std::nullopt;
+        return static_cast<std::size_t>(slot_to_key_[slot]);
     }
 };
 
@@ -217,9 +299,9 @@ public:
 // perfect_hash_map
 // ============================================================================
 
-template <std::size_t N, typename ValueT, std::size_t TableSize = N>
+template <std::size_t N, typename ValueT, std::size_t TableSize = N, std::size_t MaxKeyLen = 64>
 struct perfect_hash_map {
-    perfect_hash_set<N, TableSize> set_;
+    perfect_hash_set<N, TableSize, MaxKeyLen> set_;
     std::array<ValueT, N> values_{};
 
     consteval perfect_hash_map(
@@ -455,7 +537,8 @@ consteval auto make_perfect_set() {
     // Compute PHF once (determines table size + all data)
     constexpr auto data = detail::compute_phf<N>(keys);
     constexpr std::size_t M = data.table_size;
-    return perfect_hash_set<N, M>{keys, data};
+    constexpr std::size_t MaxLen = detail::max_key_length(keys) > 0 ? detail::max_key_length(keys) : 1;
+    return perfect_hash_set<N, M, MaxLen>{keys, data};
 }
 
 // ============================================================================
@@ -519,7 +602,8 @@ consteval auto make_perfect_map() {
     // Compute PHF once (determines table size + all data)
     constexpr auto data = detail::compute_phf<N>(keys);
     constexpr std::size_t M = data.table_size;
-    return perfect_hash_map<N, ValueT, M>{keys, values, data};
+    constexpr std::size_t MaxLen = detail::max_key_length(keys) > 0 ? detail::max_key_length(keys) : 1;
+    return perfect_hash_map<N, ValueT, M, MaxLen>{keys, values, data};
 }
 
 } // namespace ConstexprCore

@@ -45,7 +45,7 @@ if(PH_BUILD_TESTS)
 endif()
 
 # Benchmarks
-option(PH_BUILD_BENCHMARKS "Build benchmarks" OFF)
+option(PH_BUILD_BENCHMARKS "Build benchmarks" ON)
 if(PH_BUILD_BENCHMARKS)
     add_subdirectory(benchmarks)
 endif()
