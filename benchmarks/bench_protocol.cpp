@@ -20,6 +20,28 @@
 
 #include "counters/bench.h"
 
+
+template <class Function1, class Function2>
+counters::event_aggregate shuffle_bench(Function1 &&function1, Function2 &&function2, size_t min_repeat = 300,
+                      size_t min_time_ns = 400'000'000,
+                      size_t max_repeat = 1000000,
+                      size_t min_time_per_inner_ns = 30000) {
+  static thread_local counters::event_collector collector;
+  auto fn = std::forward<Function1>(function1);
+  auto fn2 = std::forward<Function2>(function2);
+  size_t N = min_repeat;
+  // Measurement
+  counters::event_aggregate aggregate{};
+  for (size_t i = 0; i < N; i++) {
+    collector.start();
+    fn();
+    counters::event_count allocate_count = collector.end();
+    aggregate << allocate_count;
+    fn2();
+  }
+  return aggregate;
+}
+
 enum class SchemeType : uint8_t {
   HTTP = 0,        /**< http:// scheme (port 80) */
   NOT_SPECIAL = 1, /**< Non-special scheme (no default port) */
@@ -177,6 +199,11 @@ void collect_benchmark_results(size_t number_strings) {
       {"wss", SchemeType::WSS},
       {"file", SchemeType::FILE}
   };
+  std::mt19937_64 gen(42); // fixed seed for reproducibility
+
+  auto shuffle = [&strings, &gen]() {
+    std::shuffle(strings.begin(), strings.end(), gen);
+  };
 
 
   auto count_naive = [&strings, &expected_types]() {
@@ -187,7 +214,8 @@ void collect_benchmark_results(size_t number_strings) {
       }
     }
   };
-  pretty_print("naive", number_strings, counters::bench(count_naive));
+  pretty_print("naive", number_strings, shuffle_bench(count_naive, shuffle));
+  gen.seed(42); // reset seed to ensure same shuffle for all benchmarks
 
   auto count_ours = [&strings, &expected_types, &methods]() {
     for (size_t i = 0; i < strings.size(); i++) {
@@ -197,7 +225,8 @@ void collect_benchmark_results(size_t number_strings) {
       }
     }
   };
-  pretty_print("constexpr_perfect_map", number_strings, counters::bench(count_ours));
+  pretty_print("constexpr_perfect_map", number_strings, shuffle_bench(count_ours, shuffle));
+  gen.seed(42); // reset seed to ensure same shuffle for all benchmarks
 
   auto count_runtime_map = [&strings, &expected_types]() {
     for (size_t i = 0; i < strings.size(); i++) {
@@ -206,7 +235,8 @@ void collect_benchmark_results(size_t number_strings) {
       }
     }
   };
-  pretty_print("perfect_hash_map", number_strings, counters::bench(count_runtime_map));
+  pretty_print("perfect_hash_map", number_strings, shuffle_bench(count_runtime_map, shuffle));
+  gen.seed(42); // reset seed to ensure same shuffle for all benchmarks
   auto count_classic = [&strings, &expected_types]() {
     for (size_t i = 0; i < strings.size(); i++) {
       auto type = get_scheme_type(strings[i]);
@@ -216,7 +246,8 @@ void collect_benchmark_results(size_t number_strings) {
     }
   };
 
-  pretty_print("hand-tuned hash", number_strings, counters::bench(count_classic));
+  pretty_print("hand-tuned hash", number_strings, shuffle_bench(count_classic, shuffle));
+  gen.seed(42); // reset seed to ensure same shuffle for all benchmarks
 
   auto count_std_map = [&strings, &expected_types]() {
     for (size_t i = 0; i < strings.size(); i++) {
@@ -226,7 +257,8 @@ void collect_benchmark_results(size_t number_strings) {
       }
     }
   };
-  pretty_print("std::map", number_strings, counters::bench(count_std_map));
+  pretty_print("std::map", number_strings, shuffle_bench(count_std_map, shuffle));
+  gen.seed(42); // reset seed to ensure same shuffle for all benchmarks
 
   auto count_unordered_map = [&strings, &expected_types]() {
     for (size_t i = 0; i < strings.size(); i++) {
@@ -236,8 +268,8 @@ void collect_benchmark_results(size_t number_strings) {
       }
     }
   };
-  pretty_print("std::unordered_map", number_strings, counters::bench(count_unordered_map));
-
+  pretty_print("std::unordered_map", number_strings, shuffle_bench(count_unordered_map, shuffle));
+  gen.seed(42); // reset seed to ensure same shuffle for all benchmarks
 
 }
 
