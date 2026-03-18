@@ -268,9 +268,14 @@ private:
 
     // Load byte at index idx if idx < len, otherwise 0, without branching.
     // Always loads from a valid address (falls back to p[0] when out of range).
+    // Load byte at index idx if idx < len, otherwise 0, without branching.
     [[nodiscard]] inline __attribute__((always_inline)) static constexpr uint64_t safe_byte(const char* p, std::size_t len, std::size_t idx) noexcept {
-        return idx < len ? static_cast<unsigned char>(p[idx]) : 0;
+        const std::size_t has_it = static_cast<std::size_t>(idx < len);   // 0 or 1
+        const std::size_t safe_idx = idx & -has_it;                       // idx or 0
+        const uint64_t byte_val = static_cast<unsigned char>(p[safe_idx]);
+        return byte_val & -static_cast<uint64_t>(has_it);                 // byte or 0
     }
+
 
     [[nodiscard]] inline __attribute__((always_inline)) static constexpr bool compare_key(const char* p, std::size_t len, std::size_t slot) noexcept {
         if consteval {
@@ -286,7 +291,6 @@ private:
             if constexpr (MaxKeyLen >= 6) input_val |= safe_byte(p, len, 5) << 40;
             if constexpr (MaxKeyLen >= 7) input_val |= safe_byte(p, len, 6) << 48;
             if constexpr (MaxKeyLen >= 8) input_val |= safe_byte(p, len, 7) << 56;
-            return input_val == packed_keys_[slot];
             if constexpr (MaxKeyLen <= 8) {
                 return input_val == packed_keys_[slot];
             } else {
@@ -446,11 +450,11 @@ private:
     static constexpr auto packed_keys_ = make_packed_keys();
 
     // Load byte at index idx if idx < len, otherwise 0, without branching.
-    // Always loads from a valid address (falls back to p[0] when out of range).
     [[nodiscard]] inline __attribute__((always_inline)) static constexpr uint64_t safe_byte(const char* p, std::size_t len, std::size_t idx) noexcept {
-        std::size_t safe_idx = idx < len ? idx : 0;
-        uint64_t byte_val = static_cast<unsigned char>(p[safe_idx]);
-        return idx < len ? byte_val : 0;
+        const std::size_t has_it = static_cast<std::size_t>(idx < len);   // 0 or 1
+        const std::size_t safe_idx = idx & -has_it;                       // idx or 0
+        const uint64_t byte_val = static_cast<unsigned char>(p[safe_idx]);
+        return byte_val & -static_cast<uint64_t>(has_it);                 // byte or 0
     }
 
     [[nodiscard]] inline __attribute__((always_inline)) static constexpr bool compare_key(const char* p, std::size_t len, std::size_t slot) noexcept {
