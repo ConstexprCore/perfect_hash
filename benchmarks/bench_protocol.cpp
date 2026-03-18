@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <format>
 #include <iostream>
 #include <map>
@@ -55,19 +56,42 @@ enum class SchemeType : uint8_t {
 namespace details {
 constexpr std::string_view is_special_list[] = {"http", " ",   "https", "ws",
                                                 "ftp",  "wss", "file",  " "};
+
+constexpr uint64_t make_key(std::string_view sv) {
+  uint64_t val = 0;
+  for (size_t i = 0; i < sv.size(); i++)
+    val |= (uint64_t)(uint8_t)sv[i] << (i * 8);
+  return val;
+}
+
+constexpr uint64_t scheme_keys[] = {
+    make_key("http"),  // 0: HTTP
+    0,                 // 1: sentinel
+    make_key("https"), // 2: HTTPS
+    make_key("ws"),    // 3: WS
+    make_key("ftp"),   // 4: FTP
+    make_key("wss"),   // 5: WSS
+    make_key("file"),  // 6: FILE
+    0,                 // 7: sentinel
+};
 }
 
 SchemeType get_scheme_type(std::string_view scheme) noexcept {
-  if (scheme.empty()) {
+  if (scheme.empty() || scheme.size() > 5) {
     return SchemeType::NOT_SPECIAL;
   }
   int hash_value = (2 * scheme.size() + (unsigned)(scheme[0])) & 7;
-  const std::string_view target = details::is_special_list[hash_value];
-  if ((target[0] == scheme[0]) && (target.substr(1) == scheme.substr(1))) {
+  const char *p = scheme.data();
+  size_t n = scheme.size();
+  uint64_t input = (uint8_t)p[0];
+  input |= ((uint64_t)(uint8_t)p[n > 1] << 8) & -(uint64_t)(n > 1);
+  input |= ((uint64_t)(uint8_t)p[(n > 2) * 2] << 16) & -(uint64_t)(n > 2);
+  input |= ((uint64_t)(uint8_t)p[(n > 3) * 3] << 24) & -(uint64_t)(n > 3);
+  input |= ((uint64_t)(uint8_t)p[(n > 4) * 4] << 32) & -(uint64_t)(n > 4);
+  if (input == details::scheme_keys[hash_value]) {
     return static_cast<SchemeType>(hash_value);
-  } else {
-    return SchemeType::NOT_SPECIAL;
   }
+  return SchemeType::NOT_SPECIAL;
 }
 
 bool hash_is_special(std::string_view input) {
@@ -236,6 +260,7 @@ void collect_benchmark_results(size_t number_strings) {
     }
   };
   pretty_print("perfect_hash_map", number_strings, shuffle_bench(count_runtime_map, shuffle));
+
   gen.seed(42); // reset seed to ensure same shuffle for all benchmarks
   auto count_classic = [&strings, &expected_types]() {
     for (size_t i = 0; i < strings.size(); i++) {
@@ -248,6 +273,7 @@ void collect_benchmark_results(size_t number_strings) {
 
   pretty_print("hand-tuned hash", number_strings, shuffle_bench(count_classic, shuffle));
   gen.seed(42); // reset seed to ensure same shuffle for all benchmarks
+
 
   auto count_std_map = [&strings, &expected_types]() {
     for (size_t i = 0; i < strings.size(); i++) {
@@ -270,6 +296,7 @@ void collect_benchmark_results(size_t number_strings) {
   };
   pretty_print("std::unordered_map", number_strings, shuffle_bench(count_unordered_map, shuffle));
   gen.seed(42); // reset seed to ensure same shuffle for all benchmarks
+
 
 }
 
