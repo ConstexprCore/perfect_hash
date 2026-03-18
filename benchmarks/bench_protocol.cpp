@@ -74,21 +74,40 @@ constexpr uint64_t scheme_keys[] = {
     make_key("file"),  // 6: FILE
     0,                 // 7: sentinel
 };
-}
 
-SchemeType get_scheme_type(std::string_view scheme) noexcept {
-  if (scheme.empty() || scheme.size() > 5) {
-    return SchemeType::NOT_SPECIAL;
-  }
-  int hash_value = (2 * scheme.size() + (unsigned)(scheme[0])) & 7;
-  const char *p = scheme.data();
-  size_t n = scheme.size();
+// branchless load of up to 5 characters into a uint64_t, padding with zeros if n < 5
+uint64_t branchless_load5(const char *p, size_t n) {
   uint64_t input = (uint8_t)p[0];
   input |= ((uint64_t)(uint8_t)p[n > 1] << 8) & -(uint64_t)(n > 1);
   input |= ((uint64_t)(uint8_t)p[(n > 2) * 2] << 16) & -(uint64_t)(n > 2);
   input |= ((uint64_t)(uint8_t)p[(n > 3) * 3] << 24) & -(uint64_t)(n > 3);
   input |= ((uint64_t)(uint8_t)p[(n > 4) * 4] << 32) & -(uint64_t)(n > 4);
-  if (input == details::scheme_keys[hash_value]) {
+  return input;
+}
+}
+SchemeType get_scheme_type(std::string_view scheme) noexcept {
+  constexpr auto make_key = [](std::string_view sv) {
+    uint64_t val = 0;
+    for (size_t i = 0; i < sv.size(); i++)
+      val |= (uint64_t)(uint8_t)sv[i] << (i * 8);
+    return val;
+  };
+  constexpr static uint64_t scheme_keys[] = {
+      make_key("http"),  // 0: HTTP
+      0,                 // 1: sentinel
+      make_key("https"), // 2: HTTPS
+      make_key("ws"),    // 3: WS
+      make_key("ftp"),   // 4: FTP
+      make_key("wss"),   // 5: WSS
+      make_key("file"),  // 6: FILE
+      0,                 // 7: sentinel
+  };
+  if (scheme.empty() || scheme.size() > 5) {
+    return SchemeType::NOT_SPECIAL;
+  }
+  int hash_value = (2 * scheme.size() + (unsigned)(scheme[0])) & 7;
+  uint64_t input = details::branchless_load5(scheme.data(), scheme.size());
+  if (scheme.size() == scheme.size() && input == scheme_keys[hash_value]) {
     return static_cast<SchemeType>(hash_value);
   }
   return SchemeType::NOT_SPECIAL;
@@ -97,8 +116,6 @@ SchemeType get_scheme_type(std::string_view scheme) noexcept {
 bool hash_is_special(std::string_view input) {
   return get_scheme_type(input) != SchemeType::NOT_SPECIAL;
 }
-
-enum class Method { GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS };
 
 double pretty_print(const std::string &name, size_t num_values,
                     counters::event_aggregate agg) {
