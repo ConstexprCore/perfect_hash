@@ -9,6 +9,10 @@ set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
+if(NOT CMAKE_BUILD_TYPE)
+    set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build." FORCE)
+endif()
+
 include(FetchContent)
 
 set(UA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
@@ -41,7 +45,7 @@ if(PH_BUILD_TESTS)
 endif()
 
 # Benchmarks
-option(PH_BUILD_BENCHMARKS "Build benchmarks" OFF)
+option(PH_BUILD_BENCHMARKS "Build benchmarks" ON)
 if(PH_BUILD_BENCHMARKS)
     add_subdirectory(benchmarks)
 endif()

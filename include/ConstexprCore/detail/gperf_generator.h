@@ -17,6 +17,25 @@ constexpr std::size_t next_power_of_2(std::size_t n) {
 static constexpr std::size_t MAX_POSITIONS = 16;
 static constexpr std::size_t LAST_CHAR = std::size_t(-1);
 
+// Round up to next power of two
+consteval std::size_t next_power_of_two(std::size_t n) {
+    if (n == 0) return 1;
+    n--;
+    n |= n >> 1;
+    n |= n >> 2;
+    n |= n >> 4;
+    n |= n >> 8;
+    n |= n >> 16;
+    n |= n >> 32;
+    n++;
+    return n;
+}
+
+// Check if a number is a power of two
+consteval bool is_power_of_two(std::size_t n) {
+    return n > 0 && (n & (n - 1)) == 0;
+}
+
 // Returns the character at a given position (LAST_CHAR means last character),
 // or 256 as a sentinel if out of bounds.
 constexpr std::size_t char_at(std::string_view key, std::size_t pos) {
@@ -217,6 +236,7 @@ consteval std::size_t select_positions(
     std::array<std::size_t, MAX_CANDIDATES> powers{};
     std::size_t num_candidates = 0;
 
+    // Don't consider positions >= max_len since they yield LAST_CHAR and are redundant.
     for (std::size_t p = 0; p < max_len && num_candidates < MAX_CANDIDATES - 1; ++p) {
         candidates[num_candidates] = p;
         powers[num_candidates] = discriminating_power(keys, p, modulus);
@@ -300,6 +320,7 @@ consteval bool try_generate_gperf(
     // Phase 1: Position selection (use M as modulus since hash computes % M)
     num_positions = select_positions<N>(keys, positions, M);
 
+    // Compute the hash value for a given key using the current association values and positions.
     auto compute = [&](std::string_view key) -> std::size_t {
         std::size_t h = key.size();
         for (std::size_t i = 0; i < num_positions; ++i) {
@@ -402,6 +423,7 @@ consteval bool try_generate_gperf(
         }
 
         if (solved) {
+            // Verify that the computed hash function produces a perfect hash: no collisions and all keys are assigned to unique slots.
             for (std::size_t i = 0; i < M; ++i) slot_to_key[i] = N;
             for (std::size_t i = 0; i < N; ++i) {
                 std::size_t slot = compute(keys[i]);
@@ -439,7 +461,7 @@ consteval void generate_gperf(
 // array so the same struct type works for any table size up to MaxM.
 template <std::size_t N>
 struct phf_result {
-    static constexpr std::size_t MAX_TABLE_SIZE = next_power_of_2(N) * 2;
+    static constexpr std::size_t MAX_TABLE_SIZE = next_power_of_2(N) * 4;
     std::size_t table_size{};
     std::array<std::size_t, 256> asso_values{};
     std::size_t num_positions{};
