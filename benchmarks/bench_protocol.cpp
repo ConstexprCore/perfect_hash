@@ -93,7 +93,7 @@ bool fancy_is_set(std::string_view input) {
   return proto_match.contains(input);
 }
 
-SchemeType fancy_get_scheme_type(std::string_view input) {
+std::optional<SchemeType> fancy_get_scheme_type(std::string_view input) {
   static constexpr auto proto_match =
       ConstexprCore::make_constexpr_perfect_map<
           ConstexprCore::kv<"http", SchemeType::HTTP>,
@@ -102,8 +102,7 @@ SchemeType fancy_get_scheme_type(std::string_view input) {
           ConstexprCore::kv<"ws", SchemeType::WS>,
           ConstexprCore::kv<"wss", SchemeType::WSS>,
           ConstexprCore::kv<"file", SchemeType::FILE>>();
-  auto result = proto_match.lookup(input);
-  return result.value_or(SchemeType::NOT_SPECIAL);
+  return proto_match.lookup(input);
 }
 
 
@@ -192,7 +191,8 @@ void collect_benchmark_results(size_t number_strings) {
 
   auto count_ours = [&strings, &expected_types, &methods]() {
     for (size_t i = 0; i < strings.size(); i++) {
-      if (auto opt = methods.lookup(strings[i]); opt) {
+      auto opt = fancy_get_scheme_type(strings[i]);
+      if (opt) {        
         expected_types[i] = *opt;
       }
     }

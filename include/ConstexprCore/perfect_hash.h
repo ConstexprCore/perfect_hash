@@ -242,16 +242,6 @@ struct constexpr_perfect_hash_set {
     }
 
 private:
-    template <std::size_t Slot>
-    [[nodiscard]] static constexpr bool compare_content(const char* p) noexcept {
-        constexpr auto& expected = Keys[Slot];
-        bool matches = true;
-        for (std::size_t i = 0; i < expected.length; ++i) {
-            matches &= (p[i] == expected.data[i]);
-        }
-        return matches;
-    }
-
     static constexpr std::size_t EMPTY_SENTINEL = static_cast<std::size_t>(-1);
 
     static constexpr auto make_lengths() noexcept {
@@ -263,34 +253,61 @@ private:
 
     static constexpr auto lengths = make_lengths();
 
-    template <std::size_t... Is>
-    [[nodiscard]] inline __attribute__((always_inline)) constexpr bool contains_impl(std::string_view key, std::size_t slot, std::index_sequence<Is...>) const noexcept {
-        bool result = false;
-        (void)((slot == Is ? (result = compare_content<Is>(key.data()), true) : false) || ...);
+    static constexpr auto make_packed_keys() noexcept {
+        std::array<uint64_t, TableSize> result{};
+        for (std::size_t i = 0; i < TableSize; ++i) {
+            if (KeyIndex[i] < N) {
+                for (std::size_t j = 0; j < Keys[i].length; ++j)
+                    result[i] |= static_cast<uint64_t>(static_cast<unsigned char>(Keys[i].data[j])) << (j * 8);
+            }
+        }
         return result;
     }
 
-    template <std::size_t... Is>
-    [[nodiscard]] constexpr std::optional<std::size_t> index_of_impl(std::string_view key, std::size_t slot, std::index_sequence<Is...>) const noexcept {
-        std::optional<std::size_t> result = std::nullopt;
-        (void)((slot == Is ? (compare_content<Is>(key.data()) ? (result = KeyIndex[Is], true) : true) : false) || ...);
-        return result;
+    static constexpr auto packed_keys_ = make_packed_keys();
+
+    // Load byte at index idx if idx < len, otherwise 0, without branching.
+    // Always loads from a valid address (falls back to p[0] when out of range).
+    [[nodiscard]] inline __attribute__((always_inline)) static constexpr uint64_t safe_byte(const char* p, std::size_t len, std::size_t idx) noexcept {
+        std::size_t safe_idx = idx < len ? idx : 0;
+        uint64_t byte_val = static_cast<unsigned char>(p[safe_idx]);
+        return idx < len ? byte_val : 0;
+    }
+
+    [[nodiscard]] inline __attribute__((always_inline)) static constexpr bool compare_key(const char* p, std::size_t len, std::size_t slot) noexcept {
+        if consteval {
+            for (std::size_t i = 0; i < len; ++i)
+                if (p[i] != Keys[slot].data[i]) return false;
+            return true;
+        } else {
+            static_assert(MaxKeyLen <= 8, "compare_key requires MaxKeyLen <= 8");
+            uint64_t input_val = static_cast<unsigned char>(p[0]);
+            if constexpr (MaxKeyLen >= 2) input_val |= safe_byte(p, len, 1) << 8;
+            if constexpr (MaxKeyLen >= 3) input_val |= safe_byte(p, len, 2) << 16;
+            if constexpr (MaxKeyLen >= 4) input_val |= safe_byte(p, len, 3) << 24;
+            if constexpr (MaxKeyLen >= 5) input_val |= safe_byte(p, len, 4) << 32;
+            if constexpr (MaxKeyLen >= 6) input_val |= safe_byte(p, len, 5) << 40;
+            if constexpr (MaxKeyLen >= 7) input_val |= safe_byte(p, len, 6) << 48;
+            if constexpr (MaxKeyLen >= 8) input_val |= safe_byte(p, len, 7) << 56;
+            return input_val == packed_keys_[slot];
+        }
     }
 
 public:
-    [[nodiscard]] constexpr bool contains(std::string_view key) const noexcept {
+    [[nodiscard]] inline __attribute__((always_inline)) constexpr bool contains(std::string_view key) const noexcept {
         std::size_t slot = compute_hash(key);
         if (slot >= TableSize || key.size() != lengths[slot]) return false;
-        return contains_impl(key, slot, std::make_index_sequence<TableSize>{});
+        return compare_key(key.data(), key.size(), slot);
     }
 
-    [[nodiscard]] constexpr std::optional<std::size_t> index_of(std::string_view key) const noexcept {
+    [[nodiscard]] inline __attribute__((always_inline)) constexpr std::optional<std::size_t> index_of(std::string_view key) const noexcept {
         std::size_t slot = compute_hash(key);
         if (slot >= TableSize || key.size() != lengths[slot]) return std::nullopt;
-        return index_of_impl(key, slot, std::make_index_sequence<TableSize>{});
+        if (!compare_key(key.data(), key.size(), slot)) return std::nullopt;
+        return static_cast<std::size_t>(KeyIndex[slot]);
     }
 
-    [[nodiscard]] constexpr std::optional<std::size_t> lookup(std::string_view key) const noexcept {
+    [[nodiscard]] inline __attribute__((always_inline)) constexpr std::optional<std::size_t> lookup(std::string_view key) const noexcept {
         return index_of(key);
     }
 };
@@ -392,16 +409,6 @@ struct constexpr_perfect_hash_map {
     }
 
 private:
-    template <std::size_t Slot>
-    [[nodiscard]] static constexpr bool compare_content(const char* p) noexcept {
-        constexpr auto& expected = Keys[Slot];
-        bool matches = true;
-        for (std::size_t i = 0; i < expected.length; ++i) {
-            matches &= (p[i] == expected.data[i]);
-        }
-        return matches;
-    }
-
     static constexpr std::size_t EMPTY_SENTINEL = static_cast<std::size_t>(-1);
 
     static constexpr auto make_lengths() noexcept {
@@ -412,35 +419,68 @@ private:
     }
 
     static constexpr auto lengths = make_lengths();
-
-    template <std::size_t... Is>
-    [[nodiscard]] inline __attribute__((always_inline)) constexpr bool contains_impl(std::string_view key, std::size_t slot, std::index_sequence<Is...>) const noexcept {
-        bool result = false;
-        (void)((slot == Is ? (result = compare_content<Is>(key.data()), true) : false) || ...);
+    // first 8 bytes of key for quick rejection of non-matching keys
+    static constexpr auto make_packed_keys() noexcept {
+        std::array<uint64_t, TableSize> result{};
+        for (std::size_t i = 0; i < TableSize; ++i) {
+            if (KeyIndex[i] < N) {
+                for (std::size_t j = 0; j < Keys[i].length; ++j)
+                    result[i] |= static_cast<uint64_t>(static_cast<unsigned char>(Keys[i].data[j])) << (j * 8);
+            }
+        }
         return result;
     }
 
-    template <std::size_t... Is>
-    [[nodiscard]] constexpr std::optional<std::size_t> index_of_impl(std::string_view key, std::size_t slot, std::index_sequence<Is...>) const noexcept {
-        std::optional<std::size_t> result = std::nullopt;
-        (void)((slot == Is ? (compare_content<Is>(key.data()) ? (result = KeyIndex[Is], true) : true) : false) || ...);
-        return result;
+    static constexpr auto packed_keys_ = make_packed_keys();
+
+    // Load byte at index idx if idx < len, otherwise 0, without branching.
+    // Always loads from a valid address (falls back to p[0] when out of range).
+    [[nodiscard]] inline __attribute__((always_inline)) static constexpr uint64_t safe_byte(const char* p, std::size_t len, std::size_t idx) noexcept {
+        std::size_t safe_idx = idx < len ? idx : 0;
+        uint64_t byte_val = static_cast<unsigned char>(p[safe_idx]);
+        return idx < len ? byte_val : 0;
+    }
+
+    [[nodiscard]] inline __attribute__((always_inline)) static constexpr bool compare_key(const char* p, std::size_t len, std::size_t slot) noexcept {
+        if consteval {
+            for (std::size_t i = 0; i < len; ++i)
+                if (p[i] != Keys[slot].data[i]) return false;
+            return true;
+        } else {
+            static_assert(MaxKeyLen <= 8, "compare_key requires MaxKeyLen <= 8");
+            uint64_t input_val = static_cast<unsigned char>(p[0]);
+            if constexpr (MaxKeyLen >= 2) input_val |= safe_byte(p, len, 1) << 8;
+            if constexpr (MaxKeyLen >= 3) input_val |= safe_byte(p, len, 2) << 16;
+            if constexpr (MaxKeyLen >= 4) input_val |= safe_byte(p, len, 3) << 24;
+            if constexpr (MaxKeyLen >= 5) input_val |= safe_byte(p, len, 4) << 32;
+            if constexpr (MaxKeyLen >= 6) input_val |= safe_byte(p, len, 5) << 40;
+            if constexpr (MaxKeyLen >= 7) input_val |= safe_byte(p, len, 6) << 48;
+            if constexpr (MaxKeyLen >= 8) input_val |= safe_byte(p, len, 7) << 56;
+            if constexpr (MaxKeyLen <= 8) {
+                return input_val == packed_keys_[slot];
+            } else {
+                // For longer keys, first check the packed prefix for a quick rejection, then 
+                // compare the full key if the prefix matches.
+                return input_val == packed_keys_[slot] && std::equal(p + 8, p + len, Keys[slot].data.data() + 8);
+            }
+        }
     }
 
 public:
-    [[nodiscard]] constexpr bool contains(std::string_view key) const noexcept {
+    [[nodiscard]] inline __attribute__((always_inline)) constexpr bool contains(std::string_view key) const noexcept {
         std::size_t slot = compute_hash(key);
         if (slot >= TableSize || key.size() != lengths[slot]) return false;
-        return contains_impl(key, slot, std::make_index_sequence<TableSize>{});
+        return compare_key(key.data(), key.size(), slot);
     }
 
-    [[nodiscard]] constexpr std::optional<std::size_t> index_of(std::string_view key) const noexcept {
+    [[nodiscard]] inline __attribute__((always_inline)) constexpr std::optional<std::size_t> index_of(std::string_view key) const noexcept {
         std::size_t slot = compute_hash(key);
         if (slot >= TableSize || key.size() != lengths[slot]) return std::nullopt;
-        return index_of_impl(key, slot, std::make_index_sequence<TableSize>{});
+        if (!compare_key(key.data(), key.size(), slot)) return std::nullopt;
+        return static_cast<std::size_t>(KeyIndex[slot]);
     }
 
-    [[nodiscard]] constexpr std::optional<ValueT> lookup(std::string_view key) const noexcept {
+    [[nodiscard]] inline __attribute__((always_inline)) constexpr std::optional<ValueT> lookup(std::string_view key) const noexcept {
         auto idx = index_of(key);
         if (idx.has_value()) {
             return Values[*idx];
