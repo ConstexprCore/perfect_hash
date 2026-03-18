@@ -269,9 +269,7 @@ private:
     // Load byte at index idx if idx < len, otherwise 0, without branching.
     // Always loads from a valid address (falls back to p[0] when out of range).
     [[nodiscard]] inline __attribute__((always_inline)) static constexpr uint64_t safe_byte(const char* p, std::size_t len, std::size_t idx) noexcept {
-        std::size_t safe_idx = idx < len ? idx : 0;
-        uint64_t byte_val = static_cast<unsigned char>(p[safe_idx]);
-        return idx < len ? byte_val : 0;
+        return idx < len ? static_cast<unsigned char>(p[idx]) : 0;
     }
 
     [[nodiscard]] inline __attribute__((always_inline)) static constexpr bool compare_key(const char* p, std::size_t len, std::size_t slot) noexcept {
@@ -280,7 +278,6 @@ private:
                 if (p[i] != Keys[slot].data[i]) return false;
             return true;
         } else {
-            static_assert(MaxKeyLen <= 8, "compare_key requires MaxKeyLen <= 8");
             uint64_t input_val = static_cast<unsigned char>(p[0]);
             if constexpr (MaxKeyLen >= 2) input_val |= safe_byte(p, len, 1) << 8;
             if constexpr (MaxKeyLen >= 3) input_val |= safe_byte(p, len, 2) << 16;
@@ -290,6 +287,21 @@ private:
             if constexpr (MaxKeyLen >= 7) input_val |= safe_byte(p, len, 6) << 48;
             if constexpr (MaxKeyLen >= 8) input_val |= safe_byte(p, len, 7) << 56;
             return input_val == packed_keys_[slot];
+            if constexpr (MaxKeyLen <= 8) {
+                return input_val == packed_keys_[slot];
+            } else {
+                if(len <= 8) {
+                    return input_val == packed_keys_[slot];
+                }
+                if(input_val != packed_keys_[slot]) {
+                    return false;
+                }
+                if(len > 8) {
+                    for (std::size_t i = 8; i < len; ++i)
+                        if (p[i] != Keys[slot].data[i]) return false;
+                }
+                return true;
+            }
         }
     }
 
@@ -447,7 +459,6 @@ private:
                 if (p[i] != Keys[slot].data[i]) return false;
             return true;
         } else {
-            static_assert(MaxKeyLen <= 8, "compare_key requires MaxKeyLen <= 8");
             uint64_t input_val = static_cast<unsigned char>(p[0]);
             if constexpr (MaxKeyLen >= 2) input_val |= safe_byte(p, len, 1) << 8;
             if constexpr (MaxKeyLen >= 3) input_val |= safe_byte(p, len, 2) << 16;
@@ -459,9 +470,17 @@ private:
             if constexpr (MaxKeyLen <= 8) {
                 return input_val == packed_keys_[slot];
             } else {
-                // For longer keys, first check the packed prefix for a quick rejection, then 
-                // compare the full key if the prefix matches.
-                return input_val == packed_keys_[slot] && std::equal(p + 8, p + len, Keys[slot].data.data() + 8);
+                if(len <= 8) {
+                    return input_val == packed_keys_[slot];
+                }
+                if(input_val != packed_keys_[slot]) {
+                    return false;
+                }
+                if(len > 8) {
+                    for (std::size_t i = 8; i < len; ++i)
+                        if (p[i] != Keys[slot].data[i]) return false;
+                }
+                return true;
             }
         }
     }
