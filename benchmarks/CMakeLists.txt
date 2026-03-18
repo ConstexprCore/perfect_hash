@@ -34,4 +34,6 @@ target_link_libraries(phf_bench PRIVATE
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     message(WARNING "Building benchmarks in debug mode may affect performance measurements.")
 endif()
-target_compile_options(phf_bench PRIVATE -fconstexpr-steps=500000000)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(phf_bench PRIVATE -fconstexpr-steps=500000000)
+endif()
