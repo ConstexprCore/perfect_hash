@@ -26,6 +26,8 @@ struct perfect_hash_set {
 
     static constexpr std::uint8_t POS_LAST_CHAR = 255;
     static constexpr bool TABLE_SIZE_IS_POW2 = (TableSize & (TableSize - 1)) == 0;
+    static constexpr bool USE_WORD_CMP = (MaxKeyLen <= sizeof(std::uint64_t));
+    using word_type = std::conditional_t<(MaxKeyLen <= 4), std::uint32_t, std::uint64_t>;
 
     // --- hot data (accessed every lookup) ---
     std::array<std::uint8_t, 256> asso_values_{};
@@ -34,6 +36,7 @@ struct perfect_hash_set {
     std::uint8_t min_key_len_{};
     std::array<std::uint8_t, TableSize> slot_key_len_{};                    // key length (0xFF = empty)
     std::array<std::array<char, MaxKeyLen>, TableSize> slot_key_data_{};    // inline key bytes
+    std::array<word_type, TableSize> slot_key_word_{};   // pre-packed for single-instruction compare (MaxKeyLen <= 8)
 
     // --- cold data (rarely accessed) ---
     std::array<std::uint8_t, TableSize> slot_to_key_{};     // hash_slot -> declaration-order index
@@ -54,8 +57,13 @@ struct perfect_hash_set {
             if (slot_to_key_[s] < N) {
                 auto k = keys[slot_to_key_[s]];
                 slot_key_len_[s] = static_cast<std::uint8_t>(k.size());
-                for (std::size_t c = 0; c < k.size(); ++c)
+                word_type w = 0;
+                for (std::size_t c = 0; c < k.size(); ++c) {
                     slot_key_data_[s][c] = k[c];
+                    if constexpr (USE_WORD_CMP)
+                        w |= static_cast<word_type>(static_cast<unsigned char>(k[c])) << (c * 8);
+                }
+                slot_key_word_[s] = w;
                 key_to_slot_[slot_to_key_[s]] = static_cast<std::uint8_t>(s);
             }
         }
@@ -136,11 +144,18 @@ struct perfect_hash_set {
         if (len < min_key_len_ || len > MaxKeyLen) return false;
         std::size_t slot = compute_hash(key);
         if (slot_key_len_[slot] != static_cast<std::uint8_t>(len)) return false;
-        const char* a = slot_key_data_[slot].data();
-        const char* b = key.data();
-        for (std::size_t i = 0; i < len; ++i)
-            if (a[i] != b[i]) return false;
-        return true;
+        if constexpr (USE_WORD_CMP) {
+            word_type key_word = 0;
+            if !consteval { __builtin_memcpy(&key_word, key.data(), len); }
+            else { for (std::size_t i = 0; i < len; ++i) key_word |= static_cast<word_type>(static_cast<unsigned char>(key[i])) << (i * 8); }
+            return slot_key_word_[slot] == key_word;
+        } else {
+            const char* a = slot_key_data_[slot].data();
+            const char* b = key.data();
+            for (std::size_t i = 0; i < len; ++i)
+                if (a[i] != b[i]) return false;
+            return true;
+        }
     }
 
     [[nodiscard]] constexpr std::size_t compute_hash(std::string_view key) const noexcept {
@@ -166,10 +181,17 @@ struct perfect_hash_set {
         if (len < min_key_len_ || len > MaxKeyLen) return std::nullopt;
         std::size_t slot = compute_hash(key);
         if (slot_key_len_[slot] != static_cast<std::uint8_t>(len)) return std::nullopt;
-        const char* a = slot_key_data_[slot].data();
-        const char* b = key.data();
-        for (std::size_t i = 0; i < len; ++i)
-            if (a[i] != b[i]) return std::nullopt;
+        if constexpr (USE_WORD_CMP) {
+            word_type key_word = 0;
+            for (std::size_t i = 0; i < len; ++i)
+                key_word |= static_cast<word_type>(static_cast<unsigned char>(key[i])) << (i * 8);
+            if (slot_key_word_[slot] != key_word) return std::nullopt;
+        } else {
+            const char* a = slot_key_data_[slot].data();
+            const char* b = key.data();
+            for (std::size_t i = 0; i < len; ++i)
+                if (a[i] != b[i]) return std::nullopt;
+        }
         return static_cast<std::size_t>(slot_to_key_[slot]);
     }
 };

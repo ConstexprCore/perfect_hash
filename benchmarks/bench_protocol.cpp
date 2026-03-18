@@ -206,7 +206,7 @@ void collect_benchmark_results(size_t number_strings) {
       }
     }
   };
-  pretty_print("perfect_hash_map", number_strings, counters::bench(count_runtime_map));
+  pretty_print("make_perfect_map", number_strings, counters::bench(count_runtime_map));
   auto count_classic = [&strings, &expected_types]() {
     for (size_t i = 0; i < strings.size(); i++) {
       auto type = get_scheme_type(strings[i]);
@@ -238,6 +238,92 @@ void collect_benchmark_results(size_t number_strings) {
   };
   pretty_print("std::unordered_map", number_strings, counters::bench(count_unordered_map));
 
+  // === Shuffled order ===
+  // Pre-generate many shuffled copies of the input vector so each benchmark
+  // iteration sees a different order.  This defeats the branch predictor
+  // (which would otherwise memorize a single repeating sequence) without
+  // including shuffle overhead in the measurement.
+  std::println("\n=== Shuffled order (defeats branch predictor) ===");
+  constexpr size_t NUM_SHUFFLES = 128;
+  std::vector<std::vector<std::string_view>> shuffled(NUM_SHUFFLES);
+  {
+    std::mt19937 rng(42);
+    for (size_t i = 0; i < NUM_SHUFFLES; ++i) {
+      shuffled[i] = strings;
+      std::shuffle(shuffled[i].begin(), shuffled[i].end(), rng);
+    }
+  }
+  size_t si = 0;
+
+  si = 0;
+  auto count_naive_shuf = [&shuffled, &si, &expected_types]() {
+    const auto& s = shuffled[si++ & (NUM_SHUFFLES - 1)];
+    for(size_t i = 0; i < s.size(); i++) {
+      auto opt = get_scheme_type_naive(s[i]);
+      if (opt) {
+        expected_types[i] = *opt;
+      }
+    }
+  };
+  pretty_print("naive (shuffled)", number_strings, counters::bench(count_naive_shuf));
+
+  si = 0;
+  auto count_ours_shuf = [&shuffled, &si, &expected_types, &methods]() {
+    const auto& s = shuffled[si++ & (NUM_SHUFFLES - 1)];
+    for (size_t i = 0; i < s.size(); i++) {
+      if (auto opt = methods.lookup(s[i]); opt) {
+        expected_types[i] = *opt;
+      }
+    }
+  };
+  pretty_print("constexpr_perfect_map (shuffled)", number_strings, counters::bench(count_ours_shuf));
+
+  si = 0;
+  auto count_runtime_map_shuf = [&shuffled, &si, &expected_types]() {
+    const auto& s = shuffled[si++ & (NUM_SHUFFLES - 1)];
+    for (size_t i = 0; i < s.size(); i++) {
+      if (auto opt = runtime_map.lookup(s[i]); opt) {
+        expected_types[i] = *opt;
+      }
+    }
+  };
+  pretty_print("make_perfect_map (shuffled)", number_strings, counters::bench(count_runtime_map_shuf));
+
+  si = 0;
+  auto count_classic_shuf = [&shuffled, &si, &expected_types]() {
+    const auto& s = shuffled[si++ & (NUM_SHUFFLES - 1)];
+    for (size_t i = 0; i < s.size(); i++) {
+      auto type = get_scheme_type(s[i]);
+      if (type != SchemeType::NOT_SPECIAL) {
+        expected_types[i] = type;
+      }
+    }
+  };
+  pretty_print("hand-tuned hash (shuffled)", number_strings, counters::bench(count_classic_shuf));
+
+  si = 0;
+  auto count_std_map_shuf = [&shuffled, &si, &expected_types]() {
+    const auto& s = shuffled[si++ & (NUM_SHUFFLES - 1)];
+    for (size_t i = 0; i < s.size(); i++) {
+      auto it = std_map.find(s[i]);
+      if (it != std_map.end()) {
+        expected_types[i] = it->second;
+      }
+    }
+  };
+  pretty_print("std::map (shuffled)", number_strings, counters::bench(count_std_map_shuf));
+
+  si = 0;
+  auto count_unordered_map_shuf = [&shuffled, &si, &expected_types]() {
+    const auto& s = shuffled[si++ & (NUM_SHUFFLES - 1)];
+    for (size_t i = 0; i < s.size(); i++) {
+      auto it = unordered_map.find(s[i]);
+      if (it != unordered_map.end()) {
+        expected_types[i] = it->second;
+      }
+    }
+  };
+  pretty_print("std::unordered_map (shuffled)", number_strings, counters::bench(count_unordered_map_shuf));
 
 }
 

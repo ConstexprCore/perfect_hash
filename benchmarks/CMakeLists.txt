@@ -24,6 +24,15 @@ target_link_libraries(bench_protocol PRIVATE
     counters::counters
 )
 
+# bench_lookup requires gperf .inc files; only build if they exist
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/http_methods_gperf.inc")
+    add_executable(phf_benchmarks bench_lookup.cpp)
+    target_link_libraries(phf_benchmarks PRIVATE
+        ConstexprCore::perfect_hash
+        benchmark::benchmark
+        benchmark::benchmark_main
+    )
+endif()
 add_executable(phf_bench bench_lookup.cpp)
 target_link_libraries(phf_bench PRIVATE
     ConstexprCore::perfect_hash
