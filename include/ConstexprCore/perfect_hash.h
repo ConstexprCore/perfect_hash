@@ -35,6 +35,9 @@ struct perfect_hash_set {
     std::array<std::uint8_t, TableSize> slot_key_len_{};                    // key length (0xFF = empty)
     std::array<std::array<char, MaxKeyLen>, TableSize> slot_key_data_{};    // inline key bytes
 
+    // --- packed keys for branchless comparison (first 8 bytes) ---
+    std::array<std::uint64_t, TableSize> packed_keys_{};
+
     // --- cold data (rarely accessed) ---
     std::array<std::uint8_t, TableSize> slot_to_key_{};     // hash_slot -> declaration-order index
     std::array<std::uint8_t, N> key_to_slot_{};             // declaration-order index -> slot
@@ -57,6 +60,17 @@ struct perfect_hash_set {
                 for (std::size_t c = 0; c < k.size(); ++c)
                     slot_key_data_[s][c] = k[c];
                 key_to_slot_[slot_to_key_[s]] = static_cast<std::uint8_t>(s);
+            }
+        }
+
+        // Build packed keys for branchless comparison
+        for (std::size_t s = 0; s < TableSize; ++s) {
+            packed_keys_[s] = 0;
+            if (slot_to_key_[s] < N) {
+                auto k = keys[slot_to_key_[s]];
+                for (std::size_t j = 0; j < k.size() && j < 8; ++j)
+                    packed_keys_[s] |= static_cast<std::uint64_t>(
+                        static_cast<unsigned char>(k[j])) << (j * 8);
             }
         }
     }
@@ -131,16 +145,54 @@ struct perfect_hash_set {
         return std::string_view(slot_key_data_[slot].data(), slot_key_len_[slot]);
     }
 
+    [[nodiscard]] static constexpr std::uint64_t safe_byte_(
+        const char* p, std::size_t len, std::size_t idx) noexcept {
+        const std::size_t has_it = static_cast<std::size_t>(idx < len);
+        const std::size_t safe_idx = idx & -has_it;
+        const std::uint64_t byte_val = static_cast<unsigned char>(p[safe_idx]);
+        return byte_val & -static_cast<std::uint64_t>(has_it);
+    }
+
+    [[nodiscard]] static constexpr std::uint64_t pack_input_(
+        const char* p, std::size_t len) noexcept {
+        std::uint64_t v = static_cast<unsigned char>(p[0]);
+        if constexpr (MaxKeyLen >= 2) v |= safe_byte_(p, len, 1) << 8;
+        if constexpr (MaxKeyLen >= 3) v |= safe_byte_(p, len, 2) << 16;
+        if constexpr (MaxKeyLen >= 4) v |= safe_byte_(p, len, 3) << 24;
+        if constexpr (MaxKeyLen >= 5) v |= safe_byte_(p, len, 4) << 32;
+        if constexpr (MaxKeyLen >= 6) v |= safe_byte_(p, len, 5) << 40;
+        if constexpr (MaxKeyLen >= 7) v |= safe_byte_(p, len, 6) << 48;
+        if constexpr (MaxKeyLen >= 8) v |= safe_byte_(p, len, 7) << 56;
+        return v;
+    }
+
+    [[nodiscard]] constexpr bool compare_key_(
+        const char* p, std::size_t len, std::size_t slot) const noexcept {
+        if consteval {
+            const char* a = slot_key_data_[slot].data();
+            for (std::size_t i = 0; i < len; ++i)
+                if (a[i] != p[i]) return false;
+            return true;
+        } else {
+            std::uint64_t input_val = pack_input_(p, len);
+            if constexpr (MaxKeyLen <= 8) {
+                return input_val == packed_keys_[slot];
+            } else {
+                if (input_val != packed_keys_[slot]) return false;
+                const char* a = slot_key_data_[slot].data();
+                for (std::size_t i = 8; i < len; ++i)
+                    if (a[i] != p[i]) return false;
+                return true;
+            }
+        }
+    }
+
     [[nodiscard]] constexpr bool contains(std::string_view key) const noexcept {
         auto len = key.size();
         if (len < min_key_len_ || len > MaxKeyLen) return false;
         std::size_t slot = compute_hash(key);
         if (slot_key_len_[slot] != static_cast<std::uint8_t>(len)) return false;
-        const char* a = slot_key_data_[slot].data();
-        const char* b = key.data();
-        for (std::size_t i = 0; i < len; ++i)
-            if (a[i] != b[i]) return false;
-        return true;
+        return compare_key_(key.data(), len, slot);
     }
 
     [[nodiscard]] constexpr std::size_t compute_hash(std::string_view key) const noexcept {
@@ -166,10 +218,7 @@ struct perfect_hash_set {
         if (len < min_key_len_ || len > MaxKeyLen) return std::nullopt;
         std::size_t slot = compute_hash(key);
         if (slot_key_len_[slot] != static_cast<std::uint8_t>(len)) return std::nullopt;
-        const char* a = slot_key_data_[slot].data();
-        const char* b = key.data();
-        for (std::size_t i = 0; i < len; ++i)
-            if (a[i] != b[i]) return std::nullopt;
+        if (!compare_key_(key.data(), len, slot)) return std::nullopt;
         return static_cast<std::size_t>(slot_to_key_[slot]);
     }
 };
