@@ -277,7 +277,7 @@ consteval std::size_t select_positions(
         // Magic constant: caps the number of count_undistinguished_pairs
         // evaluations to keep compile times bounded. Could be tuned with
         // benchmarking or exposed as a user-configurable template parameter.
-        std::size_t budget = 50000;
+        std::size_t budget = 5000;
         std::size_t num_found = 0;
         if (backtracking_search<N>(keys, candidates.data(), num_candidates,
                                    positions.data(), num_found, budget, modulus)) {
@@ -333,18 +333,17 @@ consteval bool try_generate_gperf(
         return h % M;
     };
 
-    auto char_frequency = [&](std::size_t ch) -> std::size_t {
-        if (ch >= 256) return 0;
-        std::size_t freq = 0;
-        for (std::size_t k = 0; k < N; ++k) {
-            for (std::size_t p = 0; p < num_positions; ++p) {
-                if (char_at(keys[k], positions[p]) == ch) {
-                    ++freq;
-                    break;
-                }
-            }
+    // Pre-compute character frequencies ONCE (not per-collision).
+    // This was previously O(N * positions) per collision — a major bottleneck.
+    std::array<std::size_t, 256> char_freq{};
+    for (std::size_t k = 0; k < N; ++k) {
+        for (std::size_t p = 0; p < num_positions; ++p) {
+            std::size_t ch = char_at(keys[k], positions[p]);
+            if (ch < 256) { ++char_freq[ch]; }
         }
-        return freq;
+    }
+    auto char_frequency = [&](std::size_t ch) -> std::size_t {
+        return (ch < 256) ? char_freq[ch] : 0;
     };
 
     std::size_t jump_values[12];
@@ -364,8 +363,12 @@ consteval bool try_generate_gperf(
     jump_values[num_jumps++] = 13;
     jump_values[num_jumps++] = make_odd(M > 0 ? M : 1);
 
-    std::size_t max_iterations = M * 2000;
-    if (max_iterations < 5000) max_iterations = 5000;
+    // Reduced iteration budget from M*2000 to M*500 to keep consteval
+    // compile times bounded. With power-of-2 table doubling, failing fast
+    // on tight tables and retrying with 2x space is more efficient than
+    // exhaustively searching a tight table.
+    std::size_t max_iterations = M * 500;
+    if (max_iterations < 2000) max_iterations = 2000;
 
     for (std::size_t ji = 0; ji < num_jumps; ++ji) {
         std::size_t jump = jump_values[ji];
@@ -461,7 +464,9 @@ consteval void generate_gperf(
 // array so the same struct type works for any table size up to MaxM.
 template <std::size_t N>
 struct phf_result {
-    static constexpr std::size_t MAX_TABLE_SIZE = next_power_of_2(N) * 4;
+    // Allow up to 8x the minimum table size. Sparser tables are much easier
+    // to solve (fewer collisions) which dramatically reduces consteval time.
+    static constexpr std::size_t MAX_TABLE_SIZE = next_power_of_2(N) * 8;
     std::size_t table_size{};
     std::array<std::size_t, 256> asso_values{};
     std::size_t num_positions{};
