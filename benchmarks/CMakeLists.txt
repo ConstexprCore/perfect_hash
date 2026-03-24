@@ -24,6 +24,15 @@ target_link_libraries(bench_protocol PRIVATE
     counters::counters
 )
 
+add_executable(bench_diverse_sets bench_diverse_sets.cpp)
+target_link_libraries(bench_diverse_sets PRIVATE
+    ConstexprCore::perfect_hash
+    counters::counters
+)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(bench_diverse_sets PRIVATE -fconstexpr-steps=500000000)
+endif()
+
 add_executable(phf_bench bench_lookup.cpp)
 target_link_libraries(phf_bench PRIVATE
     ConstexprCore::perfect_hash

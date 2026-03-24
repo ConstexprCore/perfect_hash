@@ -257,7 +257,7 @@ private:
         std::array<uint64_t, TableSize> result{};
         for (std::size_t i = 0; i < TableSize; ++i) {
             if (KeyIndex[i] < N) {
-                for (std::size_t j = 0; j < Keys[i].length; ++j)
+                for (std::size_t j = 0; j < Keys[i].length && j < 8; ++j)
                     result[i] |= static_cast<uint64_t>(static_cast<unsigned char>(Keys[i].data[j])) << (j * 8);
             }
         }
@@ -440,7 +440,7 @@ private:
         std::array<uint64_t, TableSize> result{};
         for (std::size_t i = 0; i < TableSize; ++i) {
             if (KeyIndex[i] < N) {
-                for (std::size_t j = 0; j < Keys[i].length; ++j)
+                for (std::size_t j = 0; j < Keys[i].length && j < 8; ++j)
                     result[i] |= static_cast<uint64_t>(static_cast<unsigned char>(Keys[i].data[j])) << (j * 8);
             }
         }
