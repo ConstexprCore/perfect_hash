@@ -182,12 +182,88 @@ std::optional<int> protocol_naive(std::string_view s) {
   return std::nullopt;
 }
 
-// Key sets 2-5 (C++ Keywords, HTTP Headers, MIME Types, Stock Tickers)
-// are defined below but commented out because the consteval PHF generator
-// cannot handle N>10 in reasonable time. See scalability note at bottom.
+// ============================================================================
+// Key set 2: S&P 100 Stock Tickers (100 keys, MaxKeyLen=4)
+// Large N, short keys — stress test for the PHF generator.
+// Uses Hash-and-Displace algorithm (O(N) expected) for fast consteval.
+// ============================================================================
 
-// Key sets 3-5 removed — consteval PHF generation is too slow for N>10.
-// See scalability analysis in main() comment below.
+static constexpr auto ticker_phf =
+    ConstexprCore::make_perfect_map<
+        ConstexprCore::kv<"AAPL",0>,ConstexprCore::kv<"ABBV",1>,
+        ConstexprCore::kv<"ABT",2>,ConstexprCore::kv<"ACN",3>,
+        ConstexprCore::kv<"ADBE",4>,ConstexprCore::kv<"AIG",5>,
+        ConstexprCore::kv<"AMD",6>,ConstexprCore::kv<"AMGN",7>,
+        ConstexprCore::kv<"AMT",8>,ConstexprCore::kv<"AMZN",9>,
+        ConstexprCore::kv<"AVGO",10>,ConstexprCore::kv<"AXP",11>,
+        ConstexprCore::kv<"BA",12>,ConstexprCore::kv<"BAC",13>,
+        ConstexprCore::kv<"BK",14>,ConstexprCore::kv<"BKNG",15>,
+        ConstexprCore::kv<"BLK",16>,ConstexprCore::kv<"BMY",17>,
+        ConstexprCore::kv<"C",18>,ConstexprCore::kv<"CAT",19>,
+        ConstexprCore::kv<"CHTR",20>,ConstexprCore::kv<"CL",21>,
+        ConstexprCore::kv<"CMCSA",22>,ConstexprCore::kv<"COF",23>,
+        ConstexprCore::kv<"COP",24>,ConstexprCore::kv<"COST",25>,
+        ConstexprCore::kv<"CRM",26>,ConstexprCore::kv<"CSCO",27>,
+        ConstexprCore::kv<"CVS",28>,ConstexprCore::kv<"CVX",29>,
+        ConstexprCore::kv<"DE",30>,ConstexprCore::kv<"DHR",31>,
+        ConstexprCore::kv<"DIS",32>,ConstexprCore::kv<"DOW",33>,
+        ConstexprCore::kv<"DUK",34>,ConstexprCore::kv<"EMR",35>,
+        ConstexprCore::kv<"EXC",36>,ConstexprCore::kv<"F",37>,
+        ConstexprCore::kv<"FDX",38>,ConstexprCore::kv<"GD",39>,
+        ConstexprCore::kv<"GE",40>,ConstexprCore::kv<"GILD",41>,
+        ConstexprCore::kv<"GM",42>,ConstexprCore::kv<"GOOG",43>,
+        ConstexprCore::kv<"GS",44>,ConstexprCore::kv<"HD",45>,
+        ConstexprCore::kv<"HON",46>,ConstexprCore::kv<"IBM",47>,
+        ConstexprCore::kv<"INTC",48>,ConstexprCore::kv<"INTU",49>,
+        ConstexprCore::kv<"ISRG",50>,ConstexprCore::kv<"JNJ",51>,
+        ConstexprCore::kv<"JPM",52>,ConstexprCore::kv<"KHC",53>,
+        ConstexprCore::kv<"KO",54>,ConstexprCore::kv<"LIN",55>,
+        ConstexprCore::kv<"LLY",56>,ConstexprCore::kv<"LMT",57>,
+        ConstexprCore::kv<"LOW",58>,ConstexprCore::kv<"MA",59>,
+        ConstexprCore::kv<"MCD",60>,ConstexprCore::kv<"MDLZ",61>,
+        ConstexprCore::kv<"MDT",62>,ConstexprCore::kv<"MET",63>,
+        ConstexprCore::kv<"META",64>,ConstexprCore::kv<"MMM",65>,
+        ConstexprCore::kv<"MO",66>,ConstexprCore::kv<"MRK",67>,
+        ConstexprCore::kv<"MS",68>,ConstexprCore::kv<"MSFT",69>,
+        ConstexprCore::kv<"NEE",70>,ConstexprCore::kv<"NFLX",71>,
+        ConstexprCore::kv<"NKE",72>,ConstexprCore::kv<"NVDA",73>,
+        ConstexprCore::kv<"ORCL",74>,ConstexprCore::kv<"PEP",75>,
+        ConstexprCore::kv<"PFE",76>,ConstexprCore::kv<"PG",77>,
+        ConstexprCore::kv<"PM",78>,ConstexprCore::kv<"PYPL",79>,
+        ConstexprCore::kv<"QCOM",80>,ConstexprCore::kv<"RTX",81>,
+        ConstexprCore::kv<"SBUX",82>,ConstexprCore::kv<"SCHW",83>,
+        ConstexprCore::kv<"SO",84>,ConstexprCore::kv<"SPG",85>,
+        ConstexprCore::kv<"T",86>,ConstexprCore::kv<"TGT",87>,
+        ConstexprCore::kv<"TMO",88>,ConstexprCore::kv<"TMUS",89>,
+        ConstexprCore::kv<"TSLA",90>,ConstexprCore::kv<"TXN",91>,
+        ConstexprCore::kv<"UNH",92>,ConstexprCore::kv<"UNP",93>,
+        ConstexprCore::kv<"UPS",94>,ConstexprCore::kv<"USB",95>,
+        ConstexprCore::kv<"V",96>,ConstexprCore::kv<"VZ",97>,
+        ConstexprCore::kv<"WFC",98>,ConstexprCore::kv<"WMT",99>>();
+
+std::optional<int> ticker_naive(std::string_view s) {
+  // Binary search for 100 keys
+  static constexpr std::array<std::string_view, 100> sorted = []() {
+    std::array<std::string_view, 100> a = {
+      "AAPL","ABBV","ABT","ACN","ADBE","AIG","AMD","AMGN","AMT","AMZN",
+      "AVGO","AXP","BA","BAC","BK","BKNG","BLK","BMY","C","CAT",
+      "CHTR","CL","CMCSA","COF","COP","COST","CRM","CSCO","CVS","CVX",
+      "DE","DHR","DIS","DOW","DUK","EMR","EXC","F","FDX","GD",
+      "GE","GILD","GM","GOOG","GS","HD","HON","IBM","INTC","INTU",
+      "ISRG","JNJ","JPM","KHC","KO","LIN","LLY","LMT","LOW","MA",
+      "MCD","MDLZ","MDT","MET","META","MMM","MO","MRK","MS","MSFT",
+      "NEE","NFLX","NKE","NVDA","ORCL","PEP","PFE","PG","PM","PYPL",
+      "QCOM","RTX","SBUX","SCHW","SO","SPG","T","TGT","TMO","TMUS",
+      "TSLA","TXN","UNH","UNP","UPS","USB","V","VZ","WFC","WMT"
+    };
+    std::sort(a.begin(), a.end());
+    return a;
+  }();
+  auto it = std::lower_bound(sorted.begin(), sorted.end(), s);
+  if (it != sorted.end() && *it == s)
+    return static_cast<int>(it - sorted.begin());
+  return std::nullopt;
+}
 
 // ============================================================================
 // Main
@@ -202,18 +278,18 @@ int main() {
     {"http","https","ftp","ws","wss","file"},
     {"ssh","telnet","mailto","data","blob","urn"});
 
-  // NOTE: Larger key sets (C++ Keywords N=15, HTTP Headers N=25, MIME N=20,
-  // Tickers N=30+) are omitted because the consteval PHF generator takes
-  // minutes to hours and >19GB memory for N>10.
-  //
-  // The consteval interpreter is ~1000x slower than native execution. The
-  // gperf-style collision-and-bump solver runs O(N * M * iterations) array
-  // operations, each tracked step-by-step by the compiler. For N=15, M=16,
-  // this means billions of consteval steps.
-  //
-  // Fixing this requires either:
-  // 1. A fundamentally faster algorithm (CHD/hash-and-displace: O(N) expected)
-  // 2. Moving PHF generation to a build-time native tool (like gperf itself)
-  // 3. Dramatically reducing the iteration budget and compensating with
-  //    larger table sizes (trades space for compile time)
+  // --- S&P 100 Stock Tickers (100 keys, short) ---
+  run_keyset("S&P 100 Tickers", ticker_phf, ticker_naive,
+    {"AAPL","ABBV","ABT","ACN","ADBE","AIG","AMD","AMGN","AMT","AMZN",
+     "AVGO","AXP","BA","BAC","BK","BKNG","BLK","BMY","C","CAT",
+     "CHTR","CL","CMCSA","COF","COP","COST","CRM","CSCO","CVS","CVX",
+     "DE","DHR","DIS","DOW","DUK","EMR","EXC","F","FDX","GD",
+     "GE","GILD","GM","GOOG","GS","HD","HON","IBM","INTC","INTU",
+     "ISRG","JNJ","JPM","KHC","KO","LIN","LLY","LMT","LOW","MA",
+     "MCD","MDLZ","MDT","MET","META","MMM","MO","MRK","MS","MSFT",
+     "NEE","NFLX","NKE","NVDA","ORCL","PEP","PFE","PG","PM","PYPL",
+     "QCOM","RTX","SBUX","SCHW","SO","SPG","T","TGT","TMO","TMUS",
+     "TSLA","TXN","UNH","UNP","UPS","USB","V","VZ","WFC","WMT"},
+    {"RIVN","PLTR","SNAP","UBER","LYFT","COIN","HOOD","DKNG","SOFI","RBLX",
+     "ROKU","ZM","ABNB","DASH","CRWD","NET","SNOW","DDOG","MDB","PATH"});
 }

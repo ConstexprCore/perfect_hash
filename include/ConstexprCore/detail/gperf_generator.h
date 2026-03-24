@@ -595,9 +595,11 @@ consteval bool try_hash_and_displace(
 
     for (std::size_t i = 0; i < 256; ++i) asso_values[i] = 0;
 
-    // Use 2 positions for the bucket hash. Pick the 2 best positions.
-    std::size_t pos0 = positions[0];
-    std::size_t pos1 = (num_positions >= 2) ? positions[1] : LAST_CHAR;
+    // Use position 0 (first char) and LAST_CHAR (last char) for the bucket hash.
+    // These provide the best discrimination for typical key sets (identifiers,
+    // tickers, keywords) where first and last characters vary the most.
+    std::size_t pos0 = 0;
+    std::size_t pos1 = LAST_CHAR;
 
     // Set num_positions = 0xFF to signal H&D mode to compute_hash.
     // Store the actual positions in positions[0] and positions[1].
@@ -671,8 +673,14 @@ consteval bool try_hash_and_displace(
             std::array<std::size_t, N> bucket_slots{};
             for (std::size_t k = 0; k < bk_count; ++k) {
                 auto& key = keys[bucket_keys[k]];
-                std::size_t slot = (d + key.size() * 31 +
-                    static_cast<unsigned char>(key[0])) % M;
+                // Per-key hash: must be unique per key to enable displacement.
+                // Uses a simple FNV-like hash of all key bytes.
+                std::size_t kc = 2166136261ULL;
+                for (std::size_t ci = 0; ci < key.size(); ++ci) {
+                    kc ^= static_cast<unsigned char>(key[ci]);
+                    kc *= 16777619ULL;
+                }
+                std::size_t slot = (d + kc) % M;
                 if (slot_to_key[slot] != N) { ok = false; break; }
                 for (std::size_t k2 = 0; k2 < k; ++k2) {
                     if (bucket_slots[k2] == slot) { ok = false; break; }
@@ -753,7 +761,7 @@ consteval phf_result<N> compute_phf_hd_po2(
 template <std::size_t N>
 consteval phf_result<N> compute_phf(const std::array<std::string_view, N>& keys) {
     constexpr std::size_t StartM = next_power_of_2(N);
-    if constexpr (N <= 15) {
+    if constexpr (N <= 5) { // temporarily low to test H&D
         return compute_phf_po2<N, StartM>(keys);
     } else {
         return compute_phf_hd_po2<N, StartM>(keys);

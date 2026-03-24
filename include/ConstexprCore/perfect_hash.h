@@ -161,13 +161,21 @@ struct perfect_hash_set {
             // Hash-and-Displace mode: two-level hash.
             // bucket = (key[pos0] + key[pos1]*3 + key.size()*17) & 0xFF
             // slot = (asso_values[bucket] + key.size()*31 + key[0]) % M
-            std::size_t c0 = detail::char_at(key, positions_[0]);
-            std::size_t c1 = detail::char_at(key, positions_[1]);
+            // Convert POS_LAST_CHAR (255) back to detail::LAST_CHAR for char_at.
+            std::size_t p0 = (positions_[0] == POS_LAST_CHAR) ? detail::LAST_CHAR : positions_[0];
+            std::size_t p1 = (positions_[1] == POS_LAST_CHAR) ? detail::LAST_CHAR : positions_[1];
+            std::size_t c0 = detail::char_at(key, p0);
+            std::size_t c1 = detail::char_at(key, p1);
             if (c0 >= 256) c0 = 0;
             if (c1 >= 256) c1 = 0;
             std::size_t bucket = (c0 + c1 * 3 + key.size() * 17) & 0xFF;
-            std::size_t h = asso_values_[bucket] + key.size() * 31 +
-                static_cast<unsigned char>(key[0]);
+            // FNV-1a hash of full key for per-key contribution.
+            std::size_t kc = 2166136261ULL;
+            for (std::size_t ci = 0; ci < key.size(); ++ci) {
+                kc ^= static_cast<unsigned char>(key[ci]);
+                kc *= 16777619ULL;
+            }
+            std::size_t h = asso_values_[bucket] + kc;
             if constexpr (TABLE_SIZE_IS_POW2)
                 return h & (TableSize - 1);
             else
