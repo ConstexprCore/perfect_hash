@@ -523,12 +523,241 @@ consteval phf_result<N> compute_phf_po2(
     }
 }
 
-// Compute PHF for the given keys, trying power-of-2 table sizes.
-// Returns a phf_result containing all computed data (no recomputation needed).
+// ============================================================================
+// Hash-and-Displace generator: O(N) expected time, consteval-friendly.
+//
+// Instead of the gperf-style collision-and-bump (which does millions of
+// iterations), this algorithm:
+//   1. Selects distinguishing positions (same as gperf)
+//   2. Groups keys by their hash contribution from position chars
+//   3. Processes groups largest-first, finding a displacement value for
+//      each group such that all keys land on empty slots
+//
+// The displacement is stored in asso_values[], so the runtime hash function
+// is identical: h = key.size() + SUM(asso_values[key[pos_i]]) % M
+//
+// For the displacement to work, we use position 0 as the "bucket selector"
+// and find asso_values[key[pos_0]] that places each bucket's keys into
+// empty slots considering the other positions' contributions.
+// ============================================================================
+
+template <std::size_t N, std::size_t M>
+consteval bool try_hash_and_displace(
+    const std::array<std::string_view, N>& keys,
+    std::array<std::size_t, 256>& asso_values,
+    std::size_t& num_positions,
+    std::array<std::size_t, MAX_POSITIONS>& positions,
+    std::array<std::size_t, M>& slot_to_key)
+{
+    // Phase 1: Position selection (reuse existing logic)
+    num_positions = select_positions<N>(keys, positions, M);
+
+    // Phase 2: Group keys by the character at the first selected position.
+    // This character's asso_value will be the "displacement" for the group.
+    // If num_positions == 0 (lengths alone distinguish), use a simpler path.
+    if (num_positions == 0) {
+        // Lengths alone distinguish — just assign slots by length % M
+        for (std::size_t i = 0; i < 256; ++i) asso_values[i] = 0;
+        for (std::size_t i = 0; i < M; ++i) slot_to_key[i] = N;
+        for (std::size_t i = 0; i < N; ++i) {
+            std::size_t slot = keys[i].size() % M;
+            if (slot_to_key[slot] != N) return false; // collision
+            slot_to_key[slot] = i;
+        }
+        return true;
+    }
+
+    // Hash-and-Displace using a combined bucket key.
+    //
+    // To distinguish keys that share the same character at position[0] and
+    // the same length (e.g., "case" and "char"), we use a COMBINED bucket key:
+    //
+    //   bucket = (char_at(key, pos[0]) * 17 + char_at(key, pos[1]) * 3 + key.size()) & 0xFF
+    //
+    // This maps each key to a bucket in [0, 255]. We store the displacement
+    // in asso_values[bucket_index]. The runtime hash becomes:
+    //
+    //   h = asso_values[bucket_hash(key)] % M
+    //
+    // This requires compute_hash to know about the bucket hash mode.
+    // We signal it by setting num_positions = 0 and positions[0] = LAST_CHAR+1
+    // (a special sentinel), with the bucket hash parameters stored in positions[1..].
+    //
+    // ACTUALLY: The simplest compatible approach is to store a FLAT mapping
+    // from key to slot in asso_values. Since N <= 255 and we have 256 entries,
+    // we can map each key's "signature" (a single-byte hash) to its target slot.
+    //
+    // Runtime hash: h = asso_values[(key[pos0] + key[pos1] + key.size()) & 0xFF] % M
+    //
+    // This is NOT the standard gperf form. We need to modify compute_hash.
+    // Let's use a clean approach: set num_positions to a sentinel value (e.g., 255)
+    // to signal "H&D mode", then store the hash parameters.
+
+    for (std::size_t i = 0; i < 256; ++i) asso_values[i] = 0;
+
+    // Use 2 positions for the bucket hash. Pick the 2 best positions.
+    std::size_t pos0 = positions[0];
+    std::size_t pos1 = (num_positions >= 2) ? positions[1] : LAST_CHAR;
+
+    // Set num_positions = 0xFF to signal H&D mode to compute_hash.
+    // Store the actual positions in positions[0] and positions[1].
+    // compute_hash will detect num_positions == 0xFF and use:
+    //   bucket = (char_at(key, pos[0]) + char_at(key, pos[1]) + key.size()) & 0xFF
+    //   slot = asso_values[bucket] % M
+    num_positions = 0xFF; // sentinel for H&D mode
+    positions[0] = pos0;
+    positions[1] = pos1;
+
+    // Compute bucket for each key
+    auto bucket_of = [&](std::string_view key) -> std::size_t {
+        std::size_t c0 = char_at(key, pos0);
+        std::size_t c1 = char_at(key, pos1);
+        if (c0 >= 256) c0 = 0;
+        if (c1 >= 256) c1 = 0;
+        return (c0 + c1 * 3 + key.size() * 17) & 0xFF;
+    };
+
+    // Group by bucket
+    std::array<std::size_t, N> key_bucket{};
+    for (std::size_t i = 0; i < N; ++i)
+        key_bucket[i] = bucket_of(keys[i]);
+
+    // Find all unique buckets and count keys per bucket.
+    struct bucket_info { std::size_t ch; std::size_t count; };
+    std::array<bucket_info, N> buckets{};
+    std::size_t num_buckets = 0;
+    for (std::size_t i = 0; i < N; ++i) {
+        std::size_t bk = key_bucket[i];
+        bool found = false;
+        for (std::size_t b = 0; b < num_buckets; ++b) {
+            if (buckets[b].ch == bk) { ++buckets[b].count; found = true; break; }
+        }
+        if (!found) { buckets[num_buckets++] = {bk, 1}; }
+    }
+
+    // Sort buckets by count descending (bubble sort, fine for consteval).
+    for (std::size_t i = 0; i < num_buckets; ++i) {
+        for (std::size_t j = i + 1; j < num_buckets; ++j) {
+            if (buckets[j].count > buckets[i].count) {
+                auto tmp = buckets[i]; buckets[i] = buckets[j]; buckets[j] = tmp;
+            }
+        }
+    }
+
+    // Initialize slots
+    for (std::size_t i = 0; i < M; ++i) slot_to_key[i] = N;
+    for (std::size_t i = 0; i < 256; ++i) asso_values[i] = 0;
+
+    // For each bucket (largest first), find a displacement value d such that
+    // (base_hash[key] + d) % M lands all keys on empty slots.
+    for (std::size_t b = 0; b < num_buckets; ++b) {
+        std::size_t ch = buckets[b].ch;
+
+        // Collect key indices in this bucket
+        std::array<std::size_t, N> bucket_keys{};
+        std::size_t bk_count = 0;
+        for (std::size_t i = 0; i < N; ++i) {
+            if (key_bucket[i] == ch) bucket_keys[bk_count++] = i;
+        }
+
+        // Try displacement values d = 0, 1, ..., M*2-1.
+        // H&D hash: slot = (d + key.size()*31 + key[0]) % M
+        // The per-key contribution (key.size()*31 + key[0]) ensures keys
+        // in the same bucket get different base offsets.
+        bool placed = false;
+
+        for (std::size_t d = 0; d < 255; ++d) {
+            bool ok = true;
+            std::array<std::size_t, N> bucket_slots{};
+            for (std::size_t k = 0; k < bk_count; ++k) {
+                auto& key = keys[bucket_keys[k]];
+                std::size_t slot = (d + key.size() * 31 +
+                    static_cast<unsigned char>(key[0])) % M;
+                if (slot_to_key[slot] != N) { ok = false; break; }
+                for (std::size_t k2 = 0; k2 < k; ++k2) {
+                    if (bucket_slots[k2] == slot) { ok = false; break; }
+                }
+                if (!ok) break;
+                bucket_slots[k] = slot;
+            }
+
+            if (ok) {
+                asso_values[ch] = d;
+                for (std::size_t k = 0; k < bk_count; ++k) {
+                    slot_to_key[bucket_slots[k]] = bucket_keys[k];
+                }
+                placed = true;
+                break;
+            }
+        }
+
+        if (!placed) return false; // Could not place this bucket
+    }
+
+    // Verify all N keys are placed
+    std::size_t filled = 0;
+    for (std::size_t i = 0; i < M; ++i)
+        if (slot_to_key[i] != N) ++filled;
+    return filled == N;
+}
+
+// Try Hash-and-Displace for a specific table size M.
+template <std::size_t N, std::size_t M>
+consteval bool try_compute_phf_hd(
+    const std::array<std::string_view, N>& keys,
+    phf_result<N>& result)
+{
+    static_assert(M <= phf_result<N>::MAX_TABLE_SIZE, "Table size M exceeds maximum");
+
+    std::array<std::size_t, 256> asso{};
+    std::size_t npos{};
+    std::array<std::size_t, MAX_POSITIONS> pos{};
+    std::array<std::size_t, M> s2k{};
+
+    if (try_hash_and_displace<N, M>(keys, asso, npos, pos, s2k)) {
+        result.table_size = M;
+        result.asso_values = asso;
+        result.num_positions = npos;
+        result.positions = pos;
+        for (std::size_t i = 0; i < M; ++i) result.slot_to_key[i] = s2k[i];
+        for (std::size_t i = M; i < phf_result<N>::MAX_TABLE_SIZE; ++i)
+            result.slot_to_key[i] = N;
+        return true;
+    }
+    return false;
+}
+
+// Power-of-2 search using Hash-and-Displace.
+template <std::size_t N, std::size_t M>
+consteval phf_result<N> compute_phf_hd_po2(
+    const std::array<std::string_view, N>& keys)
+{
+    static_assert(M <= phf_result<N>::MAX_TABLE_SIZE, "Table size M exceeds maximum");
+
+    phf_result<N> result{};
+    if (try_compute_phf_hd<N, M>(keys, result)) {
+        return result;
+    }
+
+    constexpr std::size_t NextM = M * 2;
+    if constexpr (NextM <= phf_result<N>::MAX_TABLE_SIZE) {
+        return compute_phf_hd_po2<N, NextM>(keys);
+    } else {
+        throw "Hash-and-Displace: failed to find valid table size";
+    }
+}
+
+// Compute PHF for the given keys.
+// Uses Hash-and-Displace for N > 8 (fast consteval), gperf-style for N <= 8
+// (produces tighter tables for small sets).
 template <std::size_t N>
 consteval phf_result<N> compute_phf(const std::array<std::string_view, N>& keys) {
     constexpr std::size_t StartM = next_power_of_2(N);
-    return compute_phf_po2<N, StartM>(keys);
+    if constexpr (N <= 15) {
+        return compute_phf_po2<N, StartM>(keys);
+    } else {
+        return compute_phf_hd_po2<N, StartM>(keys);
+    }
 }
 
 } // namespace ConstexprCore::detail

@@ -103,10 +103,21 @@ struct perfect_hash_set {
                 throw "Key length exceeds MaxKeyLen";
         }
 
-        for (std::size_t i = 0; i < 256; ++i)
-            asso_values_[i] = static_cast<std::uint8_t>(data.asso_values[i] % TableSize);
+        // For gperf mode: reduce asso_values mod TableSize (values can be large from bumping).
+        // For H&D mode (num_positions == 0xFF): store raw displacement values (already < 255).
+        if (data.num_positions == 0xFF) {
+            for (std::size_t i = 0; i < 256; ++i)
+                asso_values_[i] = static_cast<std::uint8_t>(data.asso_values[i]);
+        } else {
+            for (std::size_t i = 0; i < 256; ++i)
+                asso_values_[i] = static_cast<std::uint8_t>(data.asso_values[i] % TableSize);
+        }
         num_positions_ = static_cast<std::uint8_t>(data.num_positions);
-        for (std::size_t i = 0; i < data.num_positions; ++i)
+        // Copy positions. For H&D mode (num_positions == 0xFF), only copy
+        // the 2 positions used by the bucket hash, not all 255.
+        std::size_t pos_count = data.num_positions < detail::MAX_POSITIONS
+            ? data.num_positions : detail::MAX_POSITIONS;
+        for (std::size_t i = 0; i < pos_count; ++i)
             positions_[i] = (data.positions[i] == detail::LAST_CHAR)
                 ? POS_LAST_CHAR
                 : static_cast<std::uint8_t>(data.positions[i]);
@@ -143,7 +154,26 @@ struct perfect_hash_set {
         return true;
     }
 
+    static constexpr std::uint8_t HD_MODE = 0xFF; // sentinel for Hash-and-Displace mode
+
     [[nodiscard]] constexpr std::size_t compute_hash(std::string_view key) const noexcept {
+        if (num_positions_ == HD_MODE) {
+            // Hash-and-Displace mode: two-level hash.
+            // bucket = (key[pos0] + key[pos1]*3 + key.size()*17) & 0xFF
+            // slot = (asso_values[bucket] + key.size()*31 + key[0]) % M
+            std::size_t c0 = detail::char_at(key, positions_[0]);
+            std::size_t c1 = detail::char_at(key, positions_[1]);
+            if (c0 >= 256) c0 = 0;
+            if (c1 >= 256) c1 = 0;
+            std::size_t bucket = (c0 + c1 * 3 + key.size() * 17) & 0xFF;
+            std::size_t h = asso_values_[bucket] + key.size() * 31 +
+                static_cast<unsigned char>(key[0]);
+            if constexpr (TABLE_SIZE_IS_POW2)
+                return h & (TableSize - 1);
+            else
+                return h % TableSize;
+        }
+        // Standard gperf mode
         std::size_t h = key.size();
         for (std::uint8_t i = 0; i < num_positions_; ++i) {
             std::uint8_t pos = positions_[i];
