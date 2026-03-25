@@ -228,7 +228,9 @@ struct perfect_hash_set {
             return true;
         } else {
             if constexpr (MaxKeyLen <= 8) {
-                // Overlap comparison: packed_keys_ always stores overlap encoding.
+                // Overlap comparison: packed_keys_ stores lo16|hi16|len.
+                // For len <= 4, overlap covers ALL bytes (first 2 + last 2 overlap).
+                // For len > 4, middle bytes are unchecked — verify them separately.
                 std::uint64_t encoded;
                 if (len >= 2) {
                     std::uint16_t lo, hi;
@@ -240,7 +242,26 @@ struct perfect_hash_set {
                     encoded = static_cast<unsigned char>(p[0])
                         | (static_cast<std::uint64_t>(len) << 32);
                 }
-                return encoded == packed_keys_[slot];
+                if (encoded != packed_keys_[slot]) return false;
+                // For len > 4: overlap only covers first 2 + last 2 bytes.
+                // Middle bytes (indices 2..len-3) are unchecked. Verify them.
+                // Use branchless comparison to avoid mispredictions.
+                if constexpr (MaxKeyLen > 4) {
+                    // Verify middle bytes not covered by overlap.
+                    // Truly branchless: XOR each middle byte pair, OR-accumulate,
+                    // mask out positions beyond len-2.
+                    const char* a = slot_key_data_[slot].data();
+                    std::uint64_t diff = 0;
+                    for (std::size_t i = 2; i < MaxKeyLen - 2; ++i) {
+                        std::uint64_t xor_val = static_cast<unsigned char>(a[i])
+                            ^ static_cast<unsigned char>(p[i]);
+                        // Mask: 0 if i >= len-2 (out of middle range), else keep xor
+                        std::uint64_t in_range = static_cast<std::uint64_t>(i < len - 2);
+                        diff |= xor_val & -in_range;
+                    }
+                    if (diff != 0) return false;
+                }
+                return true;
             } else {
                 // MaxKeyLen > 8: pack first 8 bytes as fast filter, then byte loop
                 std::uint64_t input_val = pack_input_(p, len);
