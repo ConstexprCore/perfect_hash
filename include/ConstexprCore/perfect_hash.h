@@ -27,14 +27,6 @@ struct perfect_hash_set {
     static constexpr std::uint8_t POS_LAST_CHAR = 255;
     static constexpr bool TABLE_SIZE_IS_POW2 = (TableSize & (TableSize - 1)) == 0;
 
-    // Overlap encoding: for min_key_len >= 2, we can verify keys using two
-    // in-bounds halfword loads: p[0..1] and p[len-2..len-1], combined with
-    // length into a single uint64. This is 22 instructions with 0 branch misses
-    // on ARM64 (vs ~50 insn for byte-by-byte loop). Falls back to byte loop
-    // for min_key_len < 2 or MaxKeyLen > 8.
-    static constexpr bool USE_OVERLAP_CMP =
-        (MaxKeyLen <= 8); // min_key_len checked at runtime
-
     // --- hot data (accessed every lookup) ---
     std::array<std::uint8_t, 256> asso_values_{};
     std::uint8_t num_positions_{};
@@ -42,7 +34,7 @@ struct perfect_hash_set {
     std::uint8_t min_key_len_{};
     std::array<std::uint8_t, TableSize> slot_key_len_{};                    // key length (0xFF = empty)
     std::array<std::array<char, MaxKeyLen>, TableSize> slot_key_data_{};    // inline key bytes
-    std::array<std::uint64_t, TableSize> slot_overlap_{};                   // pre-packed overlap encoding
+    std::array<std::uint64_t, TableSize> packed_keys_{};                    // first 8 bytes packed for branchless cmp
 
     // --- cold data (rarely accessed) ---
     std::array<std::uint8_t, TableSize> slot_to_key_{};     // hash_slot -> declaration-order index
@@ -63,24 +55,14 @@ struct perfect_hash_set {
             if (slot_to_key_[s] < N) {
                 auto k = keys[slot_to_key_[s]];
                 slot_key_len_[s] = static_cast<std::uint8_t>(k.size());
-                for (std::size_t c = 0; c < k.size(); ++c)
+                std::uint64_t packed = 0;
+                for (std::size_t c = 0; c < k.size(); ++c) {
                     slot_key_data_[s][c] = k[c];
-                // Pre-compute overlap encoding: lo16 | (hi16 << 16) | (len << 32)
-                if constexpr (USE_OVERLAP_CMP) {
-                    if (k.size() >= 2) {
-                        std::uint64_t lo = static_cast<unsigned char>(k[0])
-                            | (static_cast<std::uint64_t>(static_cast<unsigned char>(k[1])) << 8);
-                        std::uint64_t hi = static_cast<unsigned char>(k[k.size()-2])
-                            | (static_cast<std::uint64_t>(static_cast<unsigned char>(k[k.size()-1])) << 8);
-                        slot_overlap_[s] = lo | (hi << 16) | (static_cast<std::uint64_t>(k.size()) << 32);
-                    } else if (k.size() == 1) {
-                        slot_overlap_[s] = static_cast<unsigned char>(k[0])
-                            | (static_cast<std::uint64_t>(1) << 32);
-                    } else {
-                        // Empty key: length-only encoding
-                        slot_overlap_[s] = 0;
-                    }
+                    if (c < 8)
+                        packed |= static_cast<std::uint64_t>(
+                            static_cast<unsigned char>(k[c])) << (c * 8);
                 }
+                packed_keys_[s] = packed;
                 key_to_slot_[slot_to_key_[s]] = static_cast<std::uint8_t>(s);
             }
         }
@@ -167,41 +149,63 @@ struct perfect_hash_set {
         return std::string_view(slot_key_data_[slot].data(), slot_key_len_[slot]);
     }
 
+    // Branchless byte load: returns byte at idx if idx < len, else 0.
+    // Always reads from a valid address (falls back to p[0] when out of range).
+    [[nodiscard]] static constexpr std::uint64_t safe_byte_(
+        const char* p, std::size_t len, std::size_t idx) noexcept {
+        const std::size_t has_it = static_cast<std::size_t>(idx < len);
+        const std::size_t safe_idx = idx & -has_it;
+        const std::uint64_t byte_val = static_cast<unsigned char>(p[safe_idx]);
+        return byte_val & -static_cast<std::uint64_t>(has_it);
+    }
+
+    // Pack up to 8 key bytes into a uint64, zero-padded. Branchless.
+    // Uses if-constexpr on MaxKeyLen to emit only the needed byte loads.
+    [[nodiscard]] static constexpr std::uint64_t pack_input_(
+        const char* p, std::size_t len) noexcept {
+        std::uint64_t v = static_cast<unsigned char>(p[0]);
+        if constexpr (MaxKeyLen >= 2) v |= safe_byte_(p, len, 1) << 8;
+        if constexpr (MaxKeyLen >= 3) v |= safe_byte_(p, len, 2) << 16;
+        if constexpr (MaxKeyLen >= 4) v |= safe_byte_(p, len, 3) << 24;
+        if constexpr (MaxKeyLen >= 5) v |= safe_byte_(p, len, 4) << 32;
+        if constexpr (MaxKeyLen >= 6) v |= safe_byte_(p, len, 5) << 40;
+        if constexpr (MaxKeyLen >= 7) v |= safe_byte_(p, len, 6) << 48;
+        if constexpr (MaxKeyLen >= 8) v |= safe_byte_(p, len, 7) << 56;
+        return v;
+    }
+
+    // Compare key bytes against the stored key at a slot.
+    // Strategy selection (compile-time + runtime):
+    //   - consteval: byte-by-byte loop (no intrinsics available)
+    //   - runtime, MaxKeyLen <= 8: branchless pack_input_ + single uint64 compare
+    //   - runtime, MaxKeyLen > 8: pack first 8 bytes as fast filter, then byte loop
+    [[nodiscard]] constexpr bool compare_key_(
+        const char* p, std::size_t len, std::size_t slot) const noexcept {
+        if consteval {
+            const char* a = slot_key_data_[slot].data();
+            for (std::size_t i = 0; i < len; ++i)
+                if (a[i] != p[i]) return false;
+            return true;
+        } else {
+            std::uint64_t input_val = pack_input_(p, len);
+            if constexpr (MaxKeyLen <= 8) {
+                return input_val == packed_keys_[slot];
+            } else {
+                if (input_val != packed_keys_[slot]) return false;
+                const char* a = slot_key_data_[slot].data();
+                for (std::size_t i = 8; i < len; ++i)
+                    if (a[i] != p[i]) return false;
+                return true;
+            }
+        }
+    }
+
     [[nodiscard]] constexpr bool contains(std::string_view key) const noexcept {
         auto len = key.size();
         if (len < min_key_len_ || len > MaxKeyLen) return false;
         std::size_t slot = compute_hash(key);
         if (slot_key_len_[slot] != static_cast<std::uint8_t>(len)) return false;
-        if constexpr (USE_OVERLAP_CMP) {
-            if (min_key_len_ >= 2 && len >= 2) {
-                // Overlap comparison: two in-bounds halfword loads + length.
-                // Combined into a single uint64 comparison.
-                const char* p = key.data();
-                std::uint64_t encoded;
-                if consteval {
-                    // consteval: build encoding byte-by-byte
-                    std::uint64_t lo = static_cast<unsigned char>(p[0])
-                        | (static_cast<std::uint64_t>(static_cast<unsigned char>(p[1])) << 8);
-                    std::uint64_t hi = static_cast<unsigned char>(p[len-2])
-                        | (static_cast<std::uint64_t>(static_cast<unsigned char>(p[len-1])) << 8);
-                    encoded = lo | (hi << 16) | (static_cast<std::uint64_t>(len) << 32);
-                } else {
-                    // runtime: memcpy for optimal codegen (2 halfword loads)
-                    std::uint16_t lo, hi;
-                    __builtin_memcpy(&lo, p, 2);
-                    __builtin_memcpy(&hi, p + len - 2, 2);
-                    encoded = lo | (static_cast<std::uint64_t>(hi) << 16)
-                        | (static_cast<std::uint64_t>(len) << 32);
-                }
-                return encoded == slot_overlap_[slot];
-            }
-        }
-        // Fallback: byte-by-byte (for single-char keys or MaxKeyLen > 8)
-        const char* a = slot_key_data_[slot].data();
-        const char* b = key.data();
-        for (std::size_t i = 0; i < len; ++i)
-            if (a[i] != b[i]) return false;
-        return true;
+        return compare_key_(key.data(), len, slot);
     }
 
     static constexpr std::uint8_t HD_MODE = 0xFF; // sentinel for Hash-and-Displace mode
@@ -254,31 +258,7 @@ struct perfect_hash_set {
         if (len < min_key_len_ || len > MaxKeyLen) return std::nullopt;
         std::size_t slot = compute_hash(key);
         if (slot_key_len_[slot] != static_cast<std::uint8_t>(len)) return std::nullopt;
-        if constexpr (USE_OVERLAP_CMP) {
-            if (min_key_len_ >= 2 && len >= 2) {
-                const char* p = key.data();
-                std::uint64_t encoded;
-                if consteval {
-                    std::uint64_t lo = static_cast<unsigned char>(p[0])
-                        | (static_cast<std::uint64_t>(static_cast<unsigned char>(p[1])) << 8);
-                    std::uint64_t hi = static_cast<unsigned char>(p[len-2])
-                        | (static_cast<std::uint64_t>(static_cast<unsigned char>(p[len-1])) << 8);
-                    encoded = lo | (hi << 16) | (static_cast<std::uint64_t>(len) << 32);
-                } else {
-                    std::uint16_t lo, hi;
-                    __builtin_memcpy(&lo, p, 2);
-                    __builtin_memcpy(&hi, p + len - 2, 2);
-                    encoded = lo | (static_cast<std::uint64_t>(hi) << 16)
-                        | (static_cast<std::uint64_t>(len) << 32);
-                }
-                if (encoded != slot_overlap_[slot]) return std::nullopt;
-                return static_cast<std::size_t>(slot_to_key_[slot]);
-            }
-        }
-        const char* a = slot_key_data_[slot].data();
-        const char* b = key.data();
-        for (std::size_t i = 0; i < len; ++i)
-            if (a[i] != b[i]) return std::nullopt;
+        if (!compare_key_(key.data(), len, slot)) return std::nullopt;
         return static_cast<std::size_t>(slot_to_key_[slot]);
     }
 };
