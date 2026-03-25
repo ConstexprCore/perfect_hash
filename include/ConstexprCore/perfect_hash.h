@@ -57,19 +57,6 @@ struct perfect_hash_set {
                 slot_key_len_[s] = static_cast<std::uint8_t>(k.size());
                 for (std::size_t c = 0; c < k.size(); ++c)
                     slot_key_data_[s][c] = k[c];
-                // Pack key for fast comparison.
-                // We use overlap encoding (lo16 | hi16<<16 | len<<32) when
-                // ALL keys have len >= 2 (checked via min_key_len at end of init).
-                // Since we don't know min_key_len yet during this loop, we
-                // store BOTH encodings and select at the end.
-                // For simplicity, always compute sequential packing here.
-                // The overlap encoding is computed in a second pass below.
-                {
-                    std::uint64_t p = 0;
-                    for (std::size_t c = 0; c < k.size() && c < 8; ++c)
-                        p |= static_cast<std::uint64_t>(static_cast<unsigned char>(k[c])) << (c * 8);
-                    packed_keys_[s] = p;
-                }
                 key_to_slot_[slot_to_key_[s]] = static_cast<std::uint8_t>(s);
             }
         }
@@ -78,13 +65,14 @@ struct perfect_hash_set {
         // For gperf mode (min_key_len >= 2): overlap is used for comparison.
         // For H&D mode: overlap is used for BOTH hash and comparison, even
         // when min_key_len < 2 (single-char keys get a degenerate encoding).
-        if constexpr (MaxKeyLen <= 8) {
-            // Always use overlap encoding for packed_keys_ when MaxKeyLen <= 8.
-            // This ensures consistency: both gperf and H&D comparison paths
-            // use the same encoding. For len >= 2: lo16|hi16|len. For len=1: byte|len.
-            for (std::size_t s = 0; s < TableSize; ++s) {
-                if (slot_to_key_[s] < N) {
-                    auto k = keys[slot_to_key_[s]];
+        // Build packed_keys_ for fast key comparison.
+        for (std::size_t s = 0; s < TableSize; ++s) {
+            if (slot_to_key_[s] < N) {
+                auto k = keys[slot_to_key_[s]];
+                if constexpr (MaxKeyLen <= 8) {
+                    // Overlap encoding: lo16 | hi16<<16 | len<<32.
+                    // For len <= 4, overlap covers all bytes.
+                    // For len 5-8, middle bytes verified separately.
                     if (k.size() >= 2) {
                         std::uint64_t lo = static_cast<unsigned char>(k[0])
                             | (static_cast<std::uint64_t>(static_cast<unsigned char>(k[1])) << 8);
@@ -95,7 +83,12 @@ struct perfect_hash_set {
                         packed_keys_[s] = static_cast<unsigned char>(k[0])
                             | (static_cast<std::uint64_t>(1) << 32);
                     }
-                    // len=0: packed_keys stays 0 (from sequential init)
+                } else {
+                    // Sequential: first 8 bytes packed (fast filter for long keys).
+                    std::uint64_t p = 0;
+                    for (std::size_t c = 0; c < k.size() && c < 8; ++c)
+                        p |= static_cast<std::uint64_t>(static_cast<unsigned char>(k[c])) << (c * 8);
+                    packed_keys_[s] = p;
                 }
             }
         }
