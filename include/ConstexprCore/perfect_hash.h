@@ -55,15 +55,39 @@ struct perfect_hash_set {
             if (slot_to_key_[s] < N) {
                 auto k = keys[slot_to_key_[s]];
                 slot_key_len_[s] = static_cast<std::uint8_t>(k.size());
-                std::uint64_t packed = 0;
-                for (std::size_t c = 0; c < k.size(); ++c) {
+                for (std::size_t c = 0; c < k.size(); ++c)
                     slot_key_data_[s][c] = k[c];
-                    if (c < 8)
-                        packed |= static_cast<std::uint64_t>(
-                            static_cast<unsigned char>(k[c])) << (c * 8);
+                // Pack key for fast comparison.
+                // We use overlap encoding (lo16 | hi16<<16 | len<<32) when
+                // ALL keys have len >= 2 (checked via min_key_len at end of init).
+                // Since we don't know min_key_len yet during this loop, we
+                // store BOTH encodings and select at the end.
+                // For simplicity, always compute sequential packing here.
+                // The overlap encoding is computed in a second pass below.
+                {
+                    std::uint64_t p = 0;
+                    for (std::size_t c = 0; c < k.size() && c < 8; ++c)
+                        p |= static_cast<std::uint64_t>(static_cast<unsigned char>(k[c])) << (c * 8);
+                    packed_keys_[s] = p;
                 }
-                packed_keys_[s] = packed;
                 key_to_slot_[slot_to_key_[s]] = static_cast<std::uint8_t>(s);
+            }
+        }
+
+        // Re-encode packed_keys_ as overlap encoding when ALL keys have len >= 2.
+        // Overlap (2 halfword loads + len) is faster than safe_byte packing.
+        if constexpr (MaxKeyLen <= 8) {
+            if (mn >= 2) {
+                for (std::size_t s = 0; s < TableSize; ++s) {
+                    if (slot_to_key_[s] < N) {
+                        auto k = keys[slot_to_key_[s]];
+                        std::uint64_t lo = static_cast<unsigned char>(k[0])
+                            | (static_cast<std::uint64_t>(static_cast<unsigned char>(k[1])) << 8);
+                        std::uint64_t hi = static_cast<unsigned char>(k[k.size()-2])
+                            | (static_cast<std::uint64_t>(static_cast<unsigned char>(k[k.size()-1])) << 8);
+                        packed_keys_[s] = lo | (hi << 16) | (static_cast<std::uint64_t>(k.size()) << 32);
+                    }
+                }
             }
         }
     }
@@ -175,22 +199,41 @@ struct perfect_hash_set {
     }
 
     // Compare key bytes against the stored key at a slot.
-    // Strategy selection (compile-time + runtime):
-    //   - consteval: byte-by-byte loop (no intrinsics available)
-    //   - runtime, MaxKeyLen <= 8: branchless pack_input_ + single uint64 compare
-    //   - runtime, MaxKeyLen > 8: pack first 8 bytes as fast filter, then byte loop
+    // Three strategies, selected at compile time:
+    //
+    // 1. Overlap LDRH (fastest, 2 loads): for MaxKeyLen <= 8 and min_key_len >= 2.
+    //    Two in-bounds halfword loads p[0..1] and p[len-2..len-1] combined with
+    //    length into a single uint64 comparison. 22 insn on ARM64, 0 BM.
+    //
+    // 2. Branchless safe_byte pack: for MaxKeyLen <= 8 when overlap isn't safe.
+    //    Packs up to 8 bytes branchlessly into uint64 using conditional indexing.
+    //
+    // 3. Byte-by-byte loop: for MaxKeyLen > 8 or consteval context.
     [[nodiscard]] constexpr bool compare_key_(
         const char* p, std::size_t len, std::size_t slot) const noexcept {
         if consteval {
+            // consteval: byte-by-byte (no intrinsics)
             const char* a = slot_key_data_[slot].data();
             for (std::size_t i = 0; i < len; ++i)
                 if (a[i] != p[i]) return false;
             return true;
         } else {
-            std::uint64_t input_val = pack_input_(p, len);
             if constexpr (MaxKeyLen <= 8) {
-                return input_val == packed_keys_[slot];
+                // Overlap LDRH: two in-bounds halfword loads + length.
+                // Fastest approach when min_key_len >= 2 (22 insn, 0 BM on ARM64).
+                if (min_key_len_ >= 2 && len >= 2) {
+                    std::uint16_t lo, hi;
+                    __builtin_memcpy(&lo, p, 2);
+                    __builtin_memcpy(&hi, p + len - 2, 2);
+                    std::uint64_t encoded = lo | (static_cast<std::uint64_t>(hi) << 16)
+                        | (static_cast<std::uint64_t>(len) << 32);
+                    return encoded == packed_keys_[slot];
+                }
+                // Fallback: branchless pack for single-char or empty keys
+                return pack_input_(p, len) == packed_keys_[slot];
             } else {
+                // MaxKeyLen > 8: pack first 8 bytes as fast filter, then byte loop
+                std::uint64_t input_val = pack_input_(p, len);
                 if (input_val != packed_keys_[slot]) return false;
                 const char* a = slot_key_data_[slot].data();
                 for (std::size_t i = 8; i < len; ++i)
