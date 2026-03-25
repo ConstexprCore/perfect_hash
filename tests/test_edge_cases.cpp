@@ -386,4 +386,22 @@ TEST_SUITE("edge_cases") {
         CHECK_FALSE(set.contains("G"));
     }
 
+    // Issue #14: H&D with adversarial keys that stress bucket displacement.
+    // All keys are 2 chars with shared prefixes — large buckets.
+    TEST_CASE("H&D mode: 25 similar 2-char keys") {
+        constexpr auto set = ConstexprCore::make_perfect_set<
+            "AA","AB","AC","AD","AE","AF","AG","AH","AI","AJ",
+            "BA","BB","BC","BD","BE","BF","BG","BH","BI","BJ",
+            "CA","CB","CC","CD","CE">();
+        static_assert(set.size() == 25);
+        static_assert(set.contains("AA"));
+        static_assert(set.contains("CE"));
+        static_assert(!set.contains("DA"));
+        static_assert(!set.contains("AK"));
+        CHECK(set.contains("AA"));
+        CHECK(set.contains("CE"));
+        CHECK_FALSE(set.contains("DA"));
+        CHECK_FALSE(set.contains("AK"));
+    }
+
 }

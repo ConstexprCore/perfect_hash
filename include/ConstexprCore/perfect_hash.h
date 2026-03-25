@@ -25,7 +25,12 @@ struct perfect_hash_set {
     static_assert(detail::MAX_POSITIONS <= 255, "MAX_POSITIONS must fit in uint8_t");
 
     static constexpr std::uint8_t POS_LAST_CHAR = 255;
+    static constexpr std::uint8_t HD_MODE = 0xFF; // num_positions_ sentinel for Hash-and-Displace mode
     static constexpr bool TABLE_SIZE_IS_POW2 = (TableSize & (TableSize - 1)) == 0;
+
+    // HD_MODE must not collide with a valid num_positions value.
+    static_assert(detail::MAX_POSITIONS < HD_MODE,
+                  "MAX_POSITIONS must be < 0xFF to avoid collision with HD_MODE sentinel");
 
     // --- hot data (accessed every lookup) ---
     std::array<std::uint8_t, 256> asso_values_{};
@@ -42,13 +47,13 @@ struct perfect_hash_set {
 
     // Shared init logic for both constructors.
     consteval void init_inline_data_(const std::array<std::string_view, N>& keys) {
-        // Compute min key length
+        // Step 1: Compute min key length for fast rejection in contains().
         std::size_t mn = keys[0].size();
         for (std::size_t i = 1; i < N; ++i)
             if (keys[i].size() < mn) mn = keys[i].size();
         min_key_len_ = static_cast<std::uint8_t>(mn);
 
-        // Populate inline key data (0xFF = empty sentinel)
+        // Step 2: Populate inline key data and inverse mapping.
         for (std::size_t s = 0; s < TableSize; ++s)
             slot_key_len_[s] = 0xFF;
         for (std::size_t s = 0; s < TableSize; ++s) {
@@ -61,11 +66,7 @@ struct perfect_hash_set {
             }
         }
 
-        // Re-encode packed_keys_ as overlap encoding.
-        // For gperf mode (min_key_len >= 2): overlap is used for comparison.
-        // For H&D mode: overlap is used for BOTH hash and comparison, even
-        // when min_key_len < 2 (single-char keys get a degenerate encoding).
-        // Build packed_keys_ for fast key comparison.
+        // Step 3: Build packed_keys_ for fast key comparison.
         for (std::size_t s = 0; s < TableSize; ++s) {
             if (slot_to_key_[s] < N) {
                 auto k = keys[slot_to_key_[s]];
@@ -276,8 +277,6 @@ struct perfect_hash_set {
         if (slot_key_len_[slot] != static_cast<std::uint8_t>(len)) return false;
         return compare_key_(key.data(), len, slot);
     }
-
-    static constexpr std::uint8_t HD_MODE = 0xFF; // sentinel for Hash-and-Displace mode
 
     [[nodiscard]] constexpr std::size_t compute_hash(std::string_view key) const noexcept {
         if (num_positions_ == HD_MODE) {

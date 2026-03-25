@@ -653,7 +653,11 @@ consteval bool try_hash_and_displace(
         // in the same bucket get different base offsets.
         bool placed = false;
 
-        for (std::size_t d = 0; d < 255; ++d) {
+        // Displacement range: d is stored in asso_values as uint8_t, so d < 255.
+        // Also, d >= M produces duplicate slots (d + kc) % M == (d%M + kc) % M,
+        // so cap at min(M, 255) to avoid redundant iterations.
+        std::size_t max_d = M < 255 ? M : 255;
+        for (std::size_t d = 0; d < max_d; ++d) {
             bool ok = true;
             std::array<std::size_t, N> bucket_slots{};
             for (std::size_t k = 0; k < bk_count; ++k) {
