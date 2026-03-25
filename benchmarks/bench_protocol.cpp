@@ -163,6 +163,8 @@ void run_keyset(const std::string &name,
 // Key set 1: URL Protocols (6 keys, MaxKeyLen=5)
 // ============================================================================
 
+// Use make_perfect_map with overlap LDRH comparison — fastest for small sets
+// with min_key_len >= 2 (two in-bounds halfword loads + single uint64 compare).
 static constexpr auto protocol_phf =
     ConstexprCore::make_perfect_map<
         ConstexprCore::kv<"http", 0>,

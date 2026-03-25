@@ -266,12 +266,11 @@ struct perfect_hash_set {
             if (c0 >= 256) c0 = 0;
             if (c1 >= 256) c1 = 0;
             std::size_t bucket = (c0 + c1 * 3 + key.size() * 17) & 0xFF;
-            // FNV-1a hash of full key for per-key contribution.
-            std::size_t kc = 2166136261ULL;
-            for (std::size_t ci = 0; ci < key.size(); ++ci) {
-                kc ^= static_cast<unsigned char>(key[ci]);
-                kc *= 16777619ULL;
-            }
+            // Lightweight per-key hash: first 4 bytes × 31.
+            // Cheaper than FNV-1a (no multiply per byte, only 4 iterations max).
+            std::size_t kc = key.size();
+            for (std::size_t ci = 0; ci < key.size() && ci < 4; ++ci)
+                kc = kc * 31 + static_cast<unsigned char>(key[ci]);
             std::size_t h = asso_values_[bucket] + kc;
             if constexpr (TABLE_SIZE_IS_POW2)
                 return h & (TableSize - 1);

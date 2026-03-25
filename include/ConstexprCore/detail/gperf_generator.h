@@ -673,13 +673,13 @@ consteval bool try_hash_and_displace(
             std::array<std::size_t, N> bucket_slots{};
             for (std::size_t k = 0; k < bk_count; ++k) {
                 auto& key = keys[bucket_keys[k]];
-                // Per-key hash: must be unique per key to enable displacement.
-                // Uses a simple FNV-like hash of all key bytes.
-                std::size_t kc = 2166136261ULL;
-                for (std::size_t ci = 0; ci < key.size(); ++ci) {
-                    kc ^= static_cast<unsigned char>(key[ci]);
-                    kc *= 16777619ULL;
-                }
+                // Per-key hash: lightweight, just needs to separate keys
+                // within the same bucket. Uses first 4 bytes packed as uint32.
+                // The bucket hash already separates by first+last char+length,
+                // so this only needs to handle intra-bucket collisions.
+                std::size_t kc = key.size();
+                for (std::size_t ci = 0; ci < key.size() && ci < 4; ++ci)
+                    kc = kc * 31 + static_cast<unsigned char>(key[ci]);
                 std::size_t slot = (d + kc) % M;
                 if (slot_to_key[slot] != N) { ok = false; break; }
                 for (std::size_t k2 = 0; k2 < k; ++k2) {
