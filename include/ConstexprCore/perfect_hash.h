@@ -288,14 +288,8 @@ struct perfect_hash_set {
 
     [[nodiscard]] constexpr std::size_t compute_hash(std::string_view key) const noexcept {
         if (num_positions_ == HD_MODE) {
-            // H&D mode: bucket from first+last char+length, per-key polynomial hash.
-            unsigned char c0 = static_cast<unsigned char>(key[0]);
-            unsigned char c1 = static_cast<unsigned char>(key[key.size() - 1]);
-            std::size_t bucket = (c0 + static_cast<std::size_t>(c1) * 3 + key.size() * 17) & 0xFF;
-            std::size_t kc = key.size();
-            for (std::size_t ci = 0; ci < key.size() && ci < 4; ++ci)
-                kc = kc * 31 + static_cast<unsigned char>(key[ci]);
-            std::size_t h = asso_values_[bucket] + kc;
+            // H&D mode: uses shared hd_bucket_hash + hd_key_hash from generator.
+            std::size_t h = asso_values_[detail::hd_bucket_hash(key)] + detail::hd_key_hash(key);
             if constexpr (TABLE_SIZE_IS_POW2)
                 return h & (TableSize - 1);
             else

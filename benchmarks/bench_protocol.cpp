@@ -87,7 +87,7 @@ void bench_workload(const std::string &label,
     std::shuffle(input.begin(), input.end(), gen);
   };
 
-  // constexpr_perfect_map
+  // make_perfect_map (perfect_hash_set-based, not NTTP constexpr_perfect_map)
   gen.seed(42);
   auto phf_fn = [&]() {
     for (size_t i = 0; i < input.size(); i++) {
@@ -95,7 +95,7 @@ void bench_workload(const std::string &label,
       if (opt) results[i] = static_cast<int>(*opt);
     }
   };
-  pretty_print(label + " constexpr_perfect_map", num_strings,
+  pretty_print(label + " make_perfect_map", num_strings,
                shuffle_bench(phf_fn, shuffle));
 
   // naive if/else

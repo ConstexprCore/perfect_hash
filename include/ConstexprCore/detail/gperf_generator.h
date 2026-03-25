@@ -523,6 +523,23 @@ consteval phf_result<N> compute_phf_po2(
     }
 }
 
+// Bucket hash for Hash-and-Displace: combines first char, last char, and length.
+// Must match between generator (consteval) and runtime (compute_hash).
+constexpr std::size_t hd_bucket_hash(std::string_view key) {
+    std::size_t c0 = key.empty() ? 0 : static_cast<unsigned char>(key[0]);
+    std::size_t c1 = key.empty() ? 0 : static_cast<unsigned char>(key[key.size() - 1]);
+    return (c0 + c1 * 3 + key.size() * 17) & 0xFF;
+}
+
+// Per-key hash for Hash-and-Displace: polynomial of first 4 bytes + length.
+// Must match between generator (consteval) and runtime (compute_hash).
+constexpr std::size_t hd_key_hash(std::string_view key) {
+    std::size_t kc = key.size();
+    for (std::size_t i = 0; i < key.size() && i < 4; ++i)
+        kc = kc * 31 + static_cast<unsigned char>(key[i]);
+    return kc;
+}
+
 // ============================================================================
 // Hash-and-Displace generator: O(N) expected time, consteval-friendly.
 //
@@ -567,32 +584,9 @@ consteval bool try_hash_and_displace(
         return true;
     }
 
-    // Hash-and-Displace using a combined bucket key.
-    //
-    // To distinguish keys that share the same character at position[0] and
-    // the same length (e.g., "case" and "char"), we use a COMBINED bucket key:
-    //
-    //   bucket = (char_at(key, pos[0]) * 17 + char_at(key, pos[1]) * 3 + key.size()) & 0xFF
-    //
-    // This maps each key to a bucket in [0, 255]. We store the displacement
-    // in asso_values[bucket_index]. The runtime hash becomes:
-    //
-    //   h = asso_values[bucket_hash(key)] % M
-    //
-    // This requires compute_hash to know about the bucket hash mode.
-    // We signal it by setting num_positions = 0 and positions[0] = LAST_CHAR+1
-    // (a special sentinel), with the bucket hash parameters stored in positions[1..].
-    //
-    // ACTUALLY: The simplest compatible approach is to store a FLAT mapping
-    // from key to slot in asso_values. Since N <= 255 and we have 256 entries,
-    // we can map each key's "signature" (a single-byte hash) to its target slot.
-    //
-    // Runtime hash: h = asso_values[(key[pos0] + key[pos1] + key.size()) & 0xFF] % M
-    //
-    // This is NOT the standard gperf form. We need to modify compute_hash.
-    // Let's use a clean approach: set num_positions to a sentinel value (e.g., 255)
-    // to signal "H&D mode", then store the hash parameters.
-
+    // Bucket hash: combine first char + last char + length into a byte index.
+    // Each unique bucket gets a displacement value stored in asso_values[bucket].
+    // Signal H&D mode to compute_hash via num_positions = 0xFF sentinel.
     for (std::size_t i = 0; i < 256; ++i) asso_values[i] = 0;
 
     // Use position 0 (first char) and LAST_CHAR (last char) for the bucket hash.
@@ -610,19 +604,10 @@ consteval bool try_hash_and_displace(
     positions[0] = pos0;
     positions[1] = pos1;
 
-    // Compute bucket for each key
-    auto bucket_of = [&](std::string_view key) -> std::size_t {
-        std::size_t c0 = char_at(key, pos0);
-        std::size_t c1 = char_at(key, pos1);
-        if (c0 >= 256) c0 = 0;
-        if (c1 >= 256) c1 = 0;
-        return (c0 + c1 * 3 + key.size() * 17) & 0xFF;
-    };
-
     // Group by bucket
     std::array<std::size_t, N> key_bucket{};
     for (std::size_t i = 0; i < N; ++i)
-        key_bucket[i] = bucket_of(keys[i]);
+        key_bucket[i] = hd_bucket_hash(keys[i]);
 
     // Find all unique buckets and count keys per bucket.
     struct bucket_info { std::size_t ch; std::size_t count; };
@@ -672,13 +657,7 @@ consteval bool try_hash_and_displace(
             bool ok = true;
             std::array<std::size_t, N> bucket_slots{};
             for (std::size_t k = 0; k < bk_count; ++k) {
-                auto& key = keys[bucket_keys[k]];
-                // Per-key hash: polynomial of first 4 bytes. Used during
-                // generation to find displacement values. Must match compute_hash.
-                std::size_t kc = key.size();
-                for (std::size_t ci = 0; ci < key.size() && ci < 4; ++ci)
-                    kc = kc * 31 + static_cast<unsigned char>(key[ci]);
-                std::size_t slot = (d + kc) % M;
+                std::size_t slot = (d + hd_key_hash(keys[bucket_keys[k]])) % M;
                 if (slot_to_key[slot] != N) { ok = false; break; }
                 for (std::size_t k2 = 0; k2 < k; ++k2) {
                     if (bucket_slots[k2] == slot) { ok = false; break; }
@@ -759,6 +738,9 @@ consteval phf_result<N> compute_phf_hd_po2(
 template <std::size_t N>
 consteval phf_result<N> compute_phf(const std::array<std::string_view, N>& keys) {
     constexpr std::size_t StartM = next_power_of_2(N);
+    // Threshold: gperf handles N<=15 in ~10s consteval; beyond that its
+    // O(N^2 * iterations) solver exceeds reasonable compile-time budgets.
+    // H&D is O(N) expected and compiles 100 keys in ~1.6 seconds.
     if constexpr (N <= 15) {
         return compute_phf_po2<N, StartM>(keys);
     } else {
