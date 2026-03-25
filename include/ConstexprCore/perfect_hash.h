@@ -74,19 +74,28 @@ struct perfect_hash_set {
             }
         }
 
-        // Re-encode packed_keys_ as overlap encoding when ALL keys have len >= 2.
-        // Overlap (2 halfword loads + len) is faster than safe_byte packing.
+        // Re-encode packed_keys_ as overlap encoding.
+        // For gperf mode (min_key_len >= 2): overlap is used for comparison.
+        // For H&D mode: overlap is used for BOTH hash and comparison, even
+        // when min_key_len < 2 (single-char keys get a degenerate encoding).
         if constexpr (MaxKeyLen <= 8) {
-            if (mn >= 2) {
-                for (std::size_t s = 0; s < TableSize; ++s) {
-                    if (slot_to_key_[s] < N) {
-                        auto k = keys[slot_to_key_[s]];
+            // Always use overlap encoding for packed_keys_ when MaxKeyLen <= 8.
+            // This ensures consistency: both gperf and H&D comparison paths
+            // use the same encoding. For len >= 2: lo16|hi16|len. For len=1: byte|len.
+            for (std::size_t s = 0; s < TableSize; ++s) {
+                if (slot_to_key_[s] < N) {
+                    auto k = keys[slot_to_key_[s]];
+                    if (k.size() >= 2) {
                         std::uint64_t lo = static_cast<unsigned char>(k[0])
                             | (static_cast<std::uint64_t>(static_cast<unsigned char>(k[1])) << 8);
                         std::uint64_t hi = static_cast<unsigned char>(k[k.size()-2])
                             | (static_cast<std::uint64_t>(static_cast<unsigned char>(k[k.size()-1])) << 8);
                         packed_keys_[s] = lo | (hi << 16) | (static_cast<std::uint64_t>(k.size()) << 32);
+                    } else if (k.size() == 1) {
+                        packed_keys_[s] = static_cast<unsigned char>(k[0])
+                            | (static_cast<std::uint64_t>(1) << 32);
                     }
+                    // len=0: packed_keys stays 0 (from sequential init)
                 }
             }
         }
@@ -219,18 +228,19 @@ struct perfect_hash_set {
             return true;
         } else {
             if constexpr (MaxKeyLen <= 8) {
-                // Overlap LDRH: two in-bounds halfword loads + length.
-                // Fastest approach when min_key_len >= 2 (22 insn, 0 BM on ARM64).
-                if (min_key_len_ >= 2 && len >= 2) {
+                // Overlap comparison: packed_keys_ always stores overlap encoding.
+                std::uint64_t encoded;
+                if (len >= 2) {
                     std::uint16_t lo, hi;
                     __builtin_memcpy(&lo, p, 2);
                     __builtin_memcpy(&hi, p + len - 2, 2);
-                    std::uint64_t encoded = lo | (static_cast<std::uint64_t>(hi) << 16)
+                    encoded = lo | (static_cast<std::uint64_t>(hi) << 16)
                         | (static_cast<std::uint64_t>(len) << 32);
-                    return encoded == packed_keys_[slot];
+                } else {
+                    encoded = static_cast<unsigned char>(p[0])
+                        | (static_cast<std::uint64_t>(len) << 32);
                 }
-                // Fallback: branchless pack for single-char or empty keys
-                return pack_input_(p, len) == packed_keys_[slot];
+                return encoded == packed_keys_[slot];
             } else {
                 // MaxKeyLen > 8: pack first 8 bytes as fast filter, then byte loop
                 std::uint64_t input_val = pack_input_(p, len);
@@ -246,6 +256,8 @@ struct perfect_hash_set {
     [[nodiscard]] constexpr bool contains(std::string_view key) const noexcept {
         auto len = key.size();
         if (len < min_key_len_ || len > MaxKeyLen) return false;
+
+        // Unified path for both gperf and H&D modes
         std::size_t slot = compute_hash(key);
         if (slot_key_len_[slot] != static_cast<std::uint8_t>(len)) return false;
         return compare_key_(key.data(), len, slot);
@@ -255,19 +267,10 @@ struct perfect_hash_set {
 
     [[nodiscard]] constexpr std::size_t compute_hash(std::string_view key) const noexcept {
         if (num_positions_ == HD_MODE) {
-            // Hash-and-Displace mode: two-level hash.
-            // bucket = (key[pos0] + key[pos1]*3 + key.size()*17) & 0xFF
-            // slot = (asso_values[bucket] + key.size()*31 + key[0]) % M
-            // Convert POS_LAST_CHAR (255) back to detail::LAST_CHAR for char_at.
-            std::size_t p0 = (positions_[0] == POS_LAST_CHAR) ? detail::LAST_CHAR : positions_[0];
-            std::size_t p1 = (positions_[1] == POS_LAST_CHAR) ? detail::LAST_CHAR : positions_[1];
-            std::size_t c0 = detail::char_at(key, p0);
-            std::size_t c1 = detail::char_at(key, p1);
-            if (c0 >= 256) c0 = 0;
-            if (c1 >= 256) c1 = 0;
-            std::size_t bucket = (c0 + c1 * 3 + key.size() * 17) & 0xFF;
-            // Lightweight per-key hash: first 4 bytes × 31.
-            // Cheaper than FNV-1a (no multiply per byte, only 4 iterations max).
+            // H&D mode: bucket from first+last char+length, per-key polynomial hash.
+            unsigned char c0 = static_cast<unsigned char>(key[0]);
+            unsigned char c1 = static_cast<unsigned char>(key[key.size() - 1]);
+            std::size_t bucket = (c0 + static_cast<std::size_t>(c1) * 3 + key.size() * 17) & 0xFF;
             std::size_t kc = key.size();
             for (std::size_t ci = 0; ci < key.size() && ci < 4; ++ci)
                 kc = kc * 31 + static_cast<unsigned char>(key[ci]);
