@@ -761,7 +761,7 @@ consteval phf_result<N> compute_phf_hd_po2(
 template <std::size_t N>
 consteval phf_result<N> compute_phf(const std::array<std::string_view, N>& keys) {
     constexpr std::size_t StartM = next_power_of_2(N);
-    if constexpr (N <= 5) { // temporarily low to test H&D
+    if constexpr (N <= 15) {
         return compute_phf_po2<N, StartM>(keys);
     } else {
         return compute_phf_hd_po2<N, StartM>(keys);
