@@ -19,9 +19,54 @@
 #include <optional>
 #include <print>
 #include <random>
+#include <set>
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+// ============================================================================
+// Filter support: --filter hits,make_perfect_map,protocol
+//   Workloads: hits, misses, mixed
+//   Methods:   make_perfect_map, naive, unordered_map
+//   Keysets:   protocol, stock
+// Omitting a category means "run all" for that category.
+// ============================================================================
+
+struct BenchFilter {
+  std::set<std::string> workloads; // hits, misses, mixed
+  std::set<std::string> methods;   // make_perfect_map, naive, unordered_map
+  std::set<std::string> keysets;   // protocol, stock
+
+  bool run_workload(const std::string &w) const {
+    return workloads.empty() || workloads.count(w);
+  }
+  bool run_method(const std::string &m) const {
+    return methods.empty() || methods.count(m);
+  }
+  bool run_keyset(const std::string &k) const {
+    return keysets.empty() || keysets.count(k);
+  }
+};
+
+BenchFilter parse_filter(const std::string &arg) {
+  BenchFilter f;
+  static const std::set<std::string> valid_workloads = {"hits", "misses", "mixed"};
+  static const std::set<std::string> valid_methods = {"make_perfect_map", "naive", "unordered_map"};
+  static const std::set<std::string> valid_keysets = {"protocol", "stock"};
+
+  size_t start = 0;
+  while (start < arg.size()) {
+    size_t end = arg.find(',', start);
+    if (end == std::string::npos) end = arg.size();
+    std::string token = arg.substr(start, end - start);
+    if (valid_workloads.count(token))      f.workloads.insert(token);
+    else if (valid_methods.count(token))   f.methods.insert(token);
+    else if (valid_keysets.count(token))    f.keysets.insert(token);
+    else std::println(stderr, "Warning: unknown filter token '{}'", token);
+    start = end + 1;
+  }
+  return f;
+}
 
 #include "ConstexprCore/perfect_hash.h"
 #include "counters/bench.h"
@@ -80,7 +125,8 @@ void bench_workload(const std::string &label,
                     size_t num_strings,
                     const PHFMap &phf_map,
                     NaiveFn naive_fn,
-                    const std::unordered_map<std::string_view, int> &uset) {
+                    const std::unordered_map<std::string_view, int> &uset,
+                    const BenchFilter &filter) {
   std::vector<int> results(num_strings, 0);
   std::mt19937_64 gen(42);
   auto shuffle = [&]() {
@@ -88,37 +134,43 @@ void bench_workload(const std::string &label,
   };
 
   // make_perfect_map (perfect_hash_set-based, not NTTP constexpr_perfect_map)
-  gen.seed(42);
-  auto phf_fn = [&]() {
-    for (size_t i = 0; i < input.size(); i++) {
-      auto opt = phf_map.lookup(input[i]);
-      if (opt) results[i] = static_cast<int>(*opt);
-    }
-  };
-  pretty_print(label + " make_perfect_map", num_strings,
-               shuffle_bench(phf_fn, shuffle));
+  if (filter.run_method("make_perfect_map")) {
+    gen.seed(42);
+    auto phf_fn = [&]() {
+      for (size_t i = 0; i < input.size(); i++) {
+        auto opt = phf_map.lookup(input[i]);
+        if (opt) results[i] = static_cast<int>(*opt);
+      }
+    };
+    pretty_print(label + " make_perfect_map", num_strings,
+                 shuffle_bench(phf_fn, shuffle));
+  }
 
   // naive if/else
-  gen.seed(42);
-  auto naive_bench = [&]() {
-    for (size_t i = 0; i < input.size(); i++) {
-      auto opt = naive_fn(input[i]);
-      if (opt) results[i] = *opt;
-    }
-  };
-  pretty_print(label + " naive", num_strings,
-               shuffle_bench(naive_bench, shuffle));
+  if (filter.run_method("naive")) {
+    gen.seed(42);
+    auto naive_bench = [&]() {
+      for (size_t i = 0; i < input.size(); i++) {
+        auto opt = naive_fn(input[i]);
+        if (opt) results[i] = *opt;
+      }
+    };
+    pretty_print(label + " naive", num_strings,
+                 shuffle_bench(naive_bench, shuffle));
+  }
 
   // std::unordered_map
-  gen.seed(42);
-  auto uset_fn = [&]() {
-    for (size_t i = 0; i < input.size(); i++) {
-      auto it = uset.find(input[i]);
-      if (it != uset.end()) results[i] = it->second;
-    }
-  };
-  pretty_print(label + " std::unordered_map", num_strings,
-               shuffle_bench(uset_fn, shuffle));
+  if (filter.run_method("unordered_map")) {
+    gen.seed(42);
+    auto uset_fn = [&]() {
+      for (size_t i = 0; i < input.size(); i++) {
+        auto it = uset.find(input[i]);
+        if (it != uset.end()) results[i] = it->second;
+      }
+    };
+    pretty_print(label + " std::unordered_map", num_strings,
+                 shuffle_bench(uset_fn, shuffle));
+  }
 }
 
 // Run a full key-set benchmark with all three workload modes.
@@ -128,6 +180,7 @@ void run_keyset(const std::string &name,
                 NaiveFn naive_fn,
                 const std::vector<std::string_view> &hit_keys,
                 const std::vector<std::string_view> &miss_keys,
+                const BenchFilter &filter,
                 size_t num_strings = 200000) {
 
   // Compute MaxKeyLen for display
@@ -151,12 +204,18 @@ void run_keyset(const std::string &name,
   mixed_pool.insert(mixed_pool.end(), miss_keys.begin(), miss_keys.end());
   auto mixed = build_input(mixed_pool, num_strings, 42);
 
-  std::println("  --- all hits ---");
-  bench_workload("hits  ", hits, num_strings, phf_map, naive_fn, uset);
-  std::println("  --- all misses ---");
-  bench_workload("misses", misses, num_strings, phf_map, naive_fn, uset);
-  std::println("  --- mixed (50/50) ---");
-  bench_workload("mixed ", mixed, num_strings, phf_map, naive_fn, uset);
+  if (filter.run_workload("hits")) {
+    std::println("  --- all hits ---");
+    bench_workload("hits  ", hits, num_strings, phf_map, naive_fn, uset, filter);
+  }
+  if (filter.run_workload("misses")) {
+    std::println("  --- all misses ---");
+    bench_workload("misses", misses, num_strings, phf_map, naive_fn, uset, filter);
+  }
+  if (filter.run_workload("mixed")) {
+    std::println("  --- mixed (50/50) ---");
+    bench_workload("mixed ", mixed, num_strings, phf_map, naive_fn, uset, filter);
+  }
 }
 
 // ============================================================================
@@ -271,27 +330,56 @@ std::optional<int> ticker_naive(std::string_view s) {
 // Main
 // ============================================================================
 
-int main() {
+int main(int argc, char *argv[]) {
   if (!counters::has_performance_counters())
     std::println("Performance counters not available, run with sudo.");
 
+  BenchFilter filter;
+  for (int i = 1; i < argc; i++) {
+    std::string arg = argv[i];
+    if (arg == "--help" || arg == "-h") {
+      std::println("Usage: {} [OPTIONS]\n", argv[0]);
+      std::println("Options:");
+      std::println("  --filter <tokens>  Comma-separated list of filter tokens");
+      std::println("  --help, -h         Show this help message\n");
+      std::println("Filter tokens (mix and match):");
+      std::println("  Workloads: hits, misses, mixed");
+      std::println("  Methods:   make_perfect_map, naive, unordered_map");
+      std::println("  Keysets:   protocol, stock\n");
+      std::println("Omitting a category runs all values for that category.\n");
+      std::println("Examples:");
+      std::println("  {} --filter hits,make_perfect_map,protocol", argv[0]);
+      std::println("  {} --filter hits,misses,stock", argv[0]);
+      return 0;
+    }
+    if (arg == "--filter" && i + 1 < argc) {
+      filter = parse_filter(argv[++i]);
+    }
+  }
+
   // --- URL Protocols (6 keys, short) ---
-  run_keyset("URL Protocols", protocol_phf, protocol_naive,
-    {"http","https","ftp","ws","wss","file"},
-    {"ssh","telnet","mailto","data","blob","urn"});
+  if (filter.run_keyset("protocol")) {
+    run_keyset("URL Protocols", protocol_phf, protocol_naive,
+      {"http","https","ftp","ws","wss","file"},
+      {"ssh","telnet","mailto","data","blob","urn"},
+      filter);
+  }
 
   // --- S&P 100 Stock Tickers (100 keys, short) ---
-  run_keyset("S&P 100 Tickers", ticker_phf, ticker_naive,
-    {"AAPL","ABBV","ABT","ACN","ADBE","AIG","AMD","AMGN","AMT","AMZN",
-     "AVGO","AXP","BA","BAC","BK","BKNG","BLK","BMY","C","CAT",
-     "CHTR","CL","CMCSA","COF","COP","COST","CRM","CSCO","CVS","CVX",
-     "DE","DHR","DIS","DOW","DUK","EMR","EXC","F","FDX","GD",
-     "GE","GILD","GM","GOOG","GS","HD","HON","IBM","INTC","INTU",
-     "ISRG","JNJ","JPM","KHC","KO","LIN","LLY","LMT","LOW","MA",
-     "MCD","MDLZ","MDT","MET","META","MMM","MO","MRK","MS","MSFT",
-     "NEE","NFLX","NKE","NVDA","ORCL","PEP","PFE","PG","PM","PYPL",
-     "QCOM","RTX","SBUX","SCHW","SO","SPG","T","TGT","TMO","TMUS",
-     "TSLA","TXN","UNH","UNP","UPS","USB","V","VZ","WFC","WMT"},
-    {"RIVN","PLTR","SNAP","UBER","LYFT","COIN","HOOD","DKNG","SOFI","RBLX",
-     "ROKU","ZM","ABNB","DASH","CRWD","NET","SNOW","DDOG","MDB","PATH"});
+  if (filter.run_keyset("stock")) {
+    run_keyset("S&P 100 Tickers", ticker_phf, ticker_naive,
+      {"AAPL","ABBV","ABT","ACN","ADBE","AIG","AMD","AMGN","AMT","AMZN",
+       "AVGO","AXP","BA","BAC","BK","BKNG","BLK","BMY","C","CAT",
+       "CHTR","CL","CMCSA","COF","COP","COST","CRM","CSCO","CVS","CVX",
+       "DE","DHR","DIS","DOW","DUK","EMR","EXC","F","FDX","GD",
+       "GE","GILD","GM","GOOG","GS","HD","HON","IBM","INTC","INTU",
+       "ISRG","JNJ","JPM","KHC","KO","LIN","LLY","LMT","LOW","MA",
+       "MCD","MDLZ","MDT","MET","META","MMM","MO","MRK","MS","MSFT",
+       "NEE","NFLX","NKE","NVDA","ORCL","PEP","PFE","PG","PM","PYPL",
+       "QCOM","RTX","SBUX","SCHW","SO","SPG","T","TGT","TMO","TMUS",
+       "TSLA","TXN","UNH","UNP","UPS","USB","V","VZ","WFC","WMT"},
+      {"RIVN","PLTR","SNAP","UBER","LYFT","COIN","HOOD","DKNG","SOFI","RBLX",
+       "ROKU","ZM","ABNB","DASH","CRWD","NET","SNOW","DDOG","MDB","PATH"},
+      filter);
+  }
 }
