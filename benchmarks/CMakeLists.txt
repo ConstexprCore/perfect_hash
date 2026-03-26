@@ -14,6 +14,13 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(counters)
 
+FetchContent_Declare(
+    unordered_dense
+    GIT_REPOSITORY https://github.com/martinus/unordered_dense.git
+    GIT_TAG v4.5.0
+)
+FetchContent_MakeAvailable(unordered_dense)
+
 
 add_executable(bench_protocol
     bench_protocol.cpp
@@ -22,6 +29,7 @@ add_executable(bench_protocol
 target_link_libraries(bench_protocol PRIVATE
     ConstexprCore::perfect_hash
     counters::counters
+    unordered_dense::unordered_dense
 )
 
 add_executable(phf_bench bench_lookup.cpp)

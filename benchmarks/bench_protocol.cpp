@@ -23,11 +23,12 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <ankerl/unordered_dense.h>
 
 // ============================================================================
 // Filter support: --filter hits,make_perfect_map,protocol
 //   Workloads: hits, misses, mixed
-//   Methods:   make_perfect_map, naive, unordered_map
+//   Methods:   make_perfect_map, naive, unordered_map, ankerl
 //   Keysets:   protocol, stock, keyword, header, mime
 // Omitting a category means "run all" for that category.
 // ============================================================================
@@ -51,7 +52,7 @@ struct BenchFilter {
 BenchFilter parse_filter(const std::string &arg) {
   BenchFilter f;
   static const std::set<std::string> valid_workloads = {"hits", "misses", "mixed"};
-  static const std::set<std::string> valid_methods = {"make_perfect_map", "naive", "unordered_map"};
+  static const std::set<std::string> valid_methods = {"make_perfect_map", "naive", "unordered_map", "ankerl"};
   static const std::set<std::string> valid_keysets = {"protocol", "stock", "keyword", "header", "mime"};
 
   size_t start = 0;
@@ -170,6 +171,24 @@ void bench_workload(const std::string &label,
     };
     pretty_print(label + " std::unordered_map", num_strings,
                  shuffle_bench(uset_fn, shuffle));
+  }
+
+  // ankerl::unordered_dense (fast flat hash map)
+  if (filter.run_method("ankerl")) {
+    static thread_local ankerl::unordered_dense::map<std::string_view, int> amap;
+    if (amap.empty()) {
+      for (auto& [k, v] : uset) amap[k] = v;
+    }
+    gen.seed(42);
+    auto amap_fn = [&]() {
+      for (size_t i = 0; i < input.size(); i++) {
+        auto it = amap.find(input[i]);
+        if (it != amap.end()) results[i] = it->second;
+      }
+    };
+    pretty_print(label + " ankerl::dense", num_strings,
+                 shuffle_bench(amap_fn, shuffle));
+    amap.clear();
   }
 }
 
@@ -446,7 +465,7 @@ int main(int argc, char *argv[]) {
       std::println("  --help, -h         Show this help message\n");
       std::println("Filter tokens (mix and match):");
       std::println("  Workloads: hits, misses, mixed");
-      std::println("  Methods:   make_perfect_map, naive, unordered_map");
+      std::println("  Methods:   make_perfect_map, naive, unordered_map, ankerl");
       std::println("  Keysets:   protocol, stock, keyword, header, mime\n");
       std::println("Omitting a category runs all values for that category.\n");
       std::println("Examples:");
