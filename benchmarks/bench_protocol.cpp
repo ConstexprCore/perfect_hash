@@ -24,11 +24,12 @@
 #include <unordered_map>
 #include <vector>
 #include <ankerl/unordered_dense.h>
+#include <absl/container/flat_hash_map.h>
 
 // ============================================================================
 // Filter support: --filter hits,make_perfect_map,protocol
 //   Workloads: hits, misses, mixed
-//   Methods:   make_perfect_map, naive, unordered_map, ankerl
+//   Methods:   make_perfect_map, naive, unordered_map, ankerl, absl
 //   Keysets:   protocol, stock, keyword, header, mime
 // Omitting a category means "run all" for that category.
 // ============================================================================
@@ -52,7 +53,7 @@ struct BenchFilter {
 BenchFilter parse_filter(const std::string &arg) {
   BenchFilter f;
   static const std::set<std::string> valid_workloads = {"hits", "misses", "mixed"};
-  static const std::set<std::string> valid_methods = {"make_perfect_map", "naive", "unordered_map", "ankerl"};
+  static const std::set<std::string> valid_methods = {"make_perfect_map", "naive", "unordered_map", "ankerl", "absl"};
   static const std::set<std::string> valid_keysets = {"protocol", "stock", "keyword", "header", "mime"};
 
   size_t start = 0;
@@ -189,6 +190,24 @@ void bench_workload(const std::string &label,
     pretty_print(label + " ankerl::dense", num_strings,
                  shuffle_bench(amap_fn, shuffle));
     amap.clear();
+  }
+
+  // absl::flat_hash_map (Google's SwissTable)
+  if (filter.run_method("absl")) {
+    static thread_local absl::flat_hash_map<std::string_view, int> absmap;
+    if (absmap.empty()) {
+      for (auto& [k, v] : uset) absmap[k] = v;
+    }
+    gen.seed(42);
+    auto absmap_fn = [&]() {
+      for (size_t i = 0; i < input.size(); i++) {
+        auto it = absmap.find(input[i]);
+        if (it != absmap.end()) results[i] = it->second;
+      }
+    };
+    pretty_print(label + " absl::flat_hash_map", num_strings,
+                 shuffle_bench(absmap_fn, shuffle));
+    absmap.clear();
   }
 }
 
@@ -465,7 +484,7 @@ int main(int argc, char *argv[]) {
       std::println("  --help, -h         Show this help message\n");
       std::println("Filter tokens (mix and match):");
       std::println("  Workloads: hits, misses, mixed");
-      std::println("  Methods:   make_perfect_map, naive, unordered_map, ankerl");
+      std::println("  Methods:   make_perfect_map, naive, unordered_map, ankerl, absl");
       std::println("  Keysets:   protocol, stock, keyword, header, mime\n");
       std::println("Omitting a category runs all values for that category.\n");
       std::println("Examples:");

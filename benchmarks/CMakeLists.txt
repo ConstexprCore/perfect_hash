@@ -21,6 +21,16 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(unordered_dense)
 
+set(ABSL_PROPAGATE_CXX_STD ON)
+set(ABSL_BUILD_TESTING OFF)
+set(ABSL_BUILD_TEST_HELPERS OFF)
+FetchContent_Declare(
+    abseil-cpp
+    GIT_REPOSITORY https://github.com/abseil/abseil-cpp.git
+    GIT_TAG 20240722.0
+)
+FetchContent_MakeAvailable(abseil-cpp)
+
 
 add_executable(bench_protocol
     bench_protocol.cpp
@@ -30,6 +40,7 @@ target_link_libraries(bench_protocol PRIVATE
     ConstexprCore::perfect_hash
     counters::counters
     unordered_dense::unordered_dense
+    absl::flat_hash_map
 )
 
 add_executable(phf_bench bench_lookup.cpp)
