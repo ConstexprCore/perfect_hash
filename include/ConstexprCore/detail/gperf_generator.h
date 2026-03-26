@@ -534,9 +534,19 @@ constexpr std::size_t hd_bucket_hash(std::string_view key) {
 // Per-key hash for Hash-and-Displace: polynomial of first 4 bytes + length.
 // Must match between generator (consteval) and runtime (compute_hash).
 constexpr std::size_t hd_key_hash(std::string_view key) {
+    // Branchless: always hash exactly 4 bytes, using 0 for out-of-range positions.
+    // At consteval this is just a loop; at runtime the compiler can unroll without
+    // length-dependent branches.
+    auto safe_char = [](const char* p, std::size_t len, std::size_t idx) -> std::size_t {
+        std::size_t has = static_cast<std::size_t>(idx < len);
+        std::size_t si = idx & -has;
+        return static_cast<unsigned char>(p[si]) & -has;
+    };
     std::size_t kc = key.size();
-    for (std::size_t i = 0; i < key.size() && i < 4; ++i)
-        kc = kc * 31 + static_cast<unsigned char>(key[i]);
+    kc = kc * 31 + static_cast<unsigned char>(key[0]); // byte 0 always valid (len >= 1)
+    kc = kc * 31 + safe_char(key.data(), key.size(), 1);
+    kc = kc * 31 + safe_char(key.data(), key.size(), 2);
+    kc = kc * 31 + safe_char(key.data(), key.size(), 3);
     return kc;
 }
 
