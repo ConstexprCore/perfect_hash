@@ -348,4 +348,60 @@ TEST_SUITE("edge_cases") {
         CHECK_FALSE(weekday_map.lookup("xyz").has_value());
     }
 
+    // Issue #12: overlap encoding correctness for keys sharing first/last 2 bytes
+    TEST_CASE("overlap encoding: middle bytes differ (len > 4)") {
+        constexpr auto set = ConstexprCore::make_perfect_set<
+            "abXcd", "abYcd", "abZcd">();
+        static_assert(set.contains("abXcd"));
+        static_assert(set.contains("abYcd"));
+        static_assert(set.contains("abZcd"));
+        static_assert(!set.contains("abWcd")); // same overlap, different middle
+        static_assert(!set.contains("ab_cd")); // same overlap, different middle
+        CHECK(set.contains("abXcd"));
+        CHECK(set.contains("abYcd"));
+        CHECK(set.contains("abZcd"));
+        CHECK_FALSE(set.contains("abWcd"));
+        CHECK_FALSE(set.contains("ab_cd"));
+    }
+
+    // Issue #13: H&D generator with larger key set (N > 15)
+    TEST_CASE("H&D mode: 20 stock tickers") {
+        constexpr auto set = ConstexprCore::make_perfect_set<
+            "AAPL","AMD","AMZN","BA","C","COST","CVX","DIS","F","GE",
+            "GOOG","GS","HD","IBM","JPM","MA","META","MSFT","NVDA","TSLA">();
+        static_assert(set.size() == 20);
+        static_assert(set.contains("AAPL"));
+        static_assert(set.contains("TSLA"));
+        static_assert(set.contains("C"));   // single-char key
+        static_assert(set.contains("F"));   // single-char key
+        static_assert(!set.contains("PLTR"));
+        static_assert(!set.contains("UBER"));
+        static_assert(!set.contains("G"));  // not in set
+        CHECK(set.contains("AAPL"));
+        CHECK(set.contains("TSLA"));
+        CHECK(set.contains("C"));
+        CHECK(set.contains("F"));
+        CHECK_FALSE(set.contains("PLTR"));
+        CHECK_FALSE(set.contains("UBER"));
+        CHECK_FALSE(set.contains("G"));
+    }
+
+    // Issue #14: H&D with adversarial keys that stress bucket displacement.
+    // All keys are 2 chars with shared prefixes — large buckets.
+    TEST_CASE("H&D mode: 25 similar 2-char keys") {
+        constexpr auto set = ConstexprCore::make_perfect_set<
+            "AA","AB","AC","AD","AE","AF","AG","AH","AI","AJ",
+            "BA","BB","BC","BD","BE","BF","BG","BH","BI","BJ",
+            "CA","CB","CC","CD","CE">();
+        static_assert(set.size() == 25);
+        static_assert(set.contains("AA"));
+        static_assert(set.contains("CE"));
+        static_assert(!set.contains("DA"));
+        static_assert(!set.contains("AK"));
+        CHECK(set.contains("AA"));
+        CHECK(set.contains("CE"));
+        CHECK_FALSE(set.contains("DA"));
+        CHECK_FALSE(set.contains("AK"));
+    }
+
 }
