@@ -114,7 +114,7 @@ cmake --build build
 
 #### Benchmark design
 
-The benchmark suite compares four lookup strategies across key sets of increasing size:
+The benchmark suite compares multiple lookup strategies across key sets of increasing size:
 
 | Key set | N | Notes |
 |---|---|---|
@@ -131,6 +131,11 @@ Each key set is tested with three query mixes (positive-only, negative-only, 50/
 - **PHF** — this library's `perfect_hash_set::contains()`
 - **gperf** — GNU `gperf`-generated lookup (where applicable)
 - **`std::unordered_set`** — stdlib hash table
+- **`ankerl::unordered_dense`** — fast flat hash map
+- **`absl::flat_hash_map`** — Google's SwissTable
+- **`frozen::unordered_map`** — compile-time perfect hash
+- **`kronuz::phf`** — hash-based perfect hash
+- **Naive** — if/else chain
 - **Binary search** — `std::binary_search` over a sorted array
 
 The gperf `.inc` baselines are pre-generated from the `.gperf` input files in `benchmarks/` using `gperf <file>.gperf > <file>_gperf.inc`.
