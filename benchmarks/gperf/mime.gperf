@@ -1,0 +1,26 @@
+%{
+#include <cstring>
+%}
+%language=C++
+%define class-name MimeGperf
+%define lookup-function-name lookup
+%readonly-tables
+%enum
+%compare-strncmp
+%%
+text/html
+text/plain
+text/css
+application/json
+application/xml
+application/pdf
+application/zip
+image/png
+image/jpeg
+image/gif
+image/webp
+audio/mpeg
+video/mp4
+font/woff2
+font/woff
+%%

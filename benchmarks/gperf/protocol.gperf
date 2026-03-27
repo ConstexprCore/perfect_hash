@@ -1,0 +1,17 @@
+%{
+#include <cstring>
+%}
+%language=C++
+%define class-name ProtocolGperf
+%define lookup-function-name lookup
+%readonly-tables
+%enum
+%compare-strncmp
+%%
+http
+https
+ftp
+ws
+wss
+file
+%%

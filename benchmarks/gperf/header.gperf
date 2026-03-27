@@ -1,0 +1,31 @@
+%{
+#include <cstring>
+%}
+%language=C++
+%define class-name HeaderGperf
+%define lookup-function-name lookup
+%readonly-tables
+%enum
+%compare-strncmp
+%%
+Accept
+Accept-Encoding
+Authorization
+Cache-Control
+Connection
+Content-Length
+Content-Type
+Cookie
+Date
+Host
+If-None-Match
+Location
+Origin
+Referer
+Server
+Set-Cookie
+User-Agent
+Vary
+Via
+X-Forwarded-For
+%%

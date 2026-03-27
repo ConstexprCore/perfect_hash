@@ -33,7 +33,7 @@
 // ============================================================================
 // Filter support: --filter hits,make_perfect_map,protocol
 //   Workloads: hits, misses, mixed
-//   Methods:   make_perfect_map, naive, unordered_map, ankerl, absl, frozen, kronuz
+//   Methods:   make_perfect_map, naive, unordered_map, ankerl, absl, frozen, kronuz, gperf
 //   Keysets:   protocol, stock, keyword, header, mime
 // Omitting a category means "run all" for that category.
 // ============================================================================
@@ -57,7 +57,7 @@ struct BenchFilter {
 BenchFilter parse_filter(const std::string &arg) {
   BenchFilter f;
   static const std::set<std::string> valid_workloads = {"hits", "misses", "mixed"};
-  static const std::set<std::string> valid_methods = {"make_perfect_map", "naive", "unordered_map", "ankerl", "absl", "frozen", "kronuz"};
+  static const std::set<std::string> valid_methods = {"make_perfect_map", "naive", "unordered_map", "ankerl", "absl", "frozen", "kronuz", "gperf"};
   static const std::set<std::string> valid_keysets = {"protocol", "stock", "keyword", "header", "mime"};
 
   size_t start = 0;
@@ -76,6 +76,22 @@ BenchFilter parse_filter(const std::string &arg) {
 
 #include "ConstexprCore/perfect_hash.h"
 #include "counters/bench.h"
+
+namespace gperf_protocol {
+#include "gperf/protocol_gperf.inc"
+}
+namespace gperf_stock {
+#include "gperf/stock_gperf.inc"
+}
+namespace gperf_keyword {
+#include "gperf/keyword_gperf.inc"
+}
+namespace gperf_header {
+#include "gperf/header_gperf.inc"
+}
+namespace gperf_mime {
+#include "gperf/mime_gperf.inc"
+}
 
 // ============================================================================
 // Infrastructure
@@ -125,7 +141,7 @@ std::vector<std::string_view> build_input(
 }
 
 // Generic benchmark: runs PHF, naive, and unordered_map on a given input vector.
-template <typename PHFMap, typename NaiveFn, typename FrozenMap, typename KronuzPHF>
+template <typename PHFMap, typename NaiveFn, typename FrozenMap, typename KronuzPHF, typename GperfFn>
 void bench_workload(const std::string &label,
                     std::vector<std::string_view> &input,
                     size_t num_strings,
@@ -134,6 +150,7 @@ void bench_workload(const std::string &label,
                     const std::unordered_map<std::string_view, int> &uset,
                     const FrozenMap &frozen_map,
                     const KronuzPHF &kronuz_phf,
+                    GperfFn gperf_fn,
                     const BenchFilter &filter) {
   std::vector<int> results(num_strings, 0);
   std::mt19937_64 gen(42);
@@ -152,6 +169,7 @@ void bench_workload(const std::string &label,
     };
     pretty_print(label + " make_perfect_map", num_strings,
                  shuffle_bench(phf_fn, shuffle));
+    volatile auto sum = std::accumulate(results.begin(), results.end(), 0); // prevent optimization
   }
 
   // naive if/else
@@ -165,6 +183,7 @@ void bench_workload(const std::string &label,
     };
     pretty_print(label + " naive", num_strings,
                  shuffle_bench(naive_bench, shuffle));
+    volatile auto sum = std::accumulate(results.begin(), results.end(), 0); // prevent optimization
   }
 
   // std::unordered_map
@@ -178,6 +197,7 @@ void bench_workload(const std::string &label,
     };
     pretty_print(label + " std::unordered_map", num_strings,
                  shuffle_bench(uset_fn, shuffle));
+    volatile auto sum = std::accumulate(results.begin(), results.end(), 0); // prevent optimization
   }
 
   // ankerl::unordered_dense (fast flat hash map)
@@ -195,6 +215,7 @@ void bench_workload(const std::string &label,
     };
     pretty_print(label + " ankerl::dense", num_strings,
                  shuffle_bench(amap_fn, shuffle));
+    volatile auto sum = std::accumulate(results.begin(), results.end(), 0); // prevent optimization
     amap.clear();
   }
 
@@ -214,6 +235,7 @@ void bench_workload(const std::string &label,
     pretty_print(label + " absl::flat_hash_map", num_strings,
                  shuffle_bench(absmap_fn, shuffle));
     absmap.clear();
+    volatile auto sum = std::accumulate(results.begin(), results.end(), 0); // prevent optimization
   }
 
   // frozen::unordered_map (compile-time perfect hash)
@@ -227,6 +249,7 @@ void bench_workload(const std::string &label,
     };
     pretty_print(label + " frozen::unordered_map", num_strings,
                  shuffle_bench(frozen_fn, shuffle));
+    volatile auto sum = std::accumulate(results.begin(), results.end(), 0); // prevent optimization
   }
 
   // Kronuz constexpr-phf (hash-based perfect hash)
@@ -241,16 +264,32 @@ void bench_workload(const std::string &label,
     };
     pretty_print(label + " kronuz::phf", num_strings,
                  shuffle_bench(kronuz_fn, shuffle));
+    volatile auto sum = std::accumulate(results.begin(), results.end(), 0); // prevent optimization
+  }
+
+  // gperf (GNU perfect hash)
+  if (filter.run_method("gperf")) {
+    gen.seed(42);
+    auto gperf_bench = [&]() {
+      for (size_t i = 0; i < input.size(); i++) {
+        auto result = gperf_fn(input[i]);
+        if (result) results[i] = *result;
+      }
+    };
+    pretty_print(label + " gperf", num_strings,
+                 shuffle_bench(gperf_bench, shuffle));
+    volatile auto sum = std::accumulate(results.begin(), results.end(), 0); // prevent optimization
   }
 }
 
 // Run a full key-set benchmark with all three workload modes.
-template <typename PHFMap, typename NaiveFn, typename FrozenMap, typename KronuzPHF>
+template <typename PHFMap, typename NaiveFn, typename FrozenMap, typename KronuzPHF, typename GperfFn>
 void run_keyset(const std::string &name,
                 const PHFMap &phf_map,
                 NaiveFn naive_fn,
                 const FrozenMap &frozen_map,
                 const KronuzPHF &kronuz_phf,
+                GperfFn gperf_fn,
                 const std::vector<std::string_view> &hit_keys,
                 const std::vector<std::string_view> &miss_keys,
                 const BenchFilter &filter,
@@ -279,15 +318,15 @@ void run_keyset(const std::string &name,
 
   if (filter.run_workload("hits")) {
     std::println("  --- all hits ---");
-    bench_workload("hits  ", hits, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, filter);
+    bench_workload("hits  ", hits, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, gperf_fn, filter);
   }
   if (filter.run_workload("misses")) {
     std::println("  --- all misses ---");
-    bench_workload("misses", misses, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, filter);
+    bench_workload("misses", misses, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, gperf_fn, filter);
   }
   if (filter.run_workload("mixed")) {
     std::println("  --- mixed (50/50) ---");
-    bench_workload("mixed ", mixed, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, filter);
+    bench_workload("mixed ", mixed, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, gperf_fn, filter);
   }
 }
 
@@ -622,7 +661,7 @@ int main(int argc, char *argv[]) {
       std::println("  --help, -h         Show this help message\n");
       std::println("Filter tokens (mix and match):");
       std::println("  Workloads: hits, misses, mixed");
-      std::println("  Methods:   make_perfect_map, naive, unordered_map, ankerl, absl, frozen, kronuz");
+      std::println("  Methods:   make_perfect_map, naive, unordered_map, ankerl, absl, frozen, kronuz, gperf");
       std::println("  Keysets:   protocol, stock, keyword, header, mime\n");
       std::println("Omitting a category runs all values for that category.\n");
       std::println("Examples:");
@@ -635,9 +674,31 @@ int main(int argc, char *argv[]) {
     }
   }
 
+  // gperf wrapper: lookup returns const char* (null on miss) → std::optional<int>
+  auto gperf_protocol = [](std::string_view s) -> std::optional<int> {
+    auto r = gperf_protocol::ProtocolGperf::lookup(s.data(), s.size());
+    return r ? std::optional<int>(static_cast<int>(r[0])) : std::nullopt;
+  };
+  auto gperf_stock = [](std::string_view s) -> std::optional<int> {
+    auto r = gperf_stock::StockGperf::lookup(s.data(), s.size());
+    return r ? std::optional<int>(static_cast<int>(r[0])) : std::nullopt;
+  };
+  auto gperf_keyword = [](std::string_view s) -> std::optional<int> {
+    auto r = gperf_keyword::KeywordGperf::lookup(s.data(), s.size());
+    return r ? std::optional<int>(static_cast<int>(r[0])) : std::nullopt;
+  };
+  auto gperf_header = [](std::string_view s) -> std::optional<int> {
+    auto r = gperf_header::HeaderGperf::lookup(s.data(), s.size());
+    return r ? std::optional<int>(static_cast<int>(r[0])) : std::nullopt;
+  };
+  auto gperf_mime = [](std::string_view s) -> std::optional<int> {
+    auto r = gperf_mime::MimeGperf::lookup(s.data(), s.size());
+    return r ? std::optional<int>(static_cast<int>(r[0])) : std::nullopt;
+  };
+
   // --- URL Protocols (6 keys, short) ---
   if (filter.run_keyset("protocol")) {
-    run_keyset("URL Protocols", protocol_phf, protocol_naive, protocol_frozen, protocol_kronuz,
+    run_keyset("URL Protocols", protocol_phf, protocol_naive, protocol_frozen, protocol_kronuz, gperf_protocol,
       {"http","https","ftp","ws","wss","file"},
       {"ssh","telnet","mailto","data","blob","urn"},
       filter);
@@ -645,7 +706,7 @@ int main(int argc, char *argv[]) {
 
   // --- S&P 100 Stock Tickers (100 keys, short) ---
   if (filter.run_keyset("stock")) {
-    run_keyset("S&P 100 Tickers", ticker_phf, ticker_naive, ticker_frozen, ticker_kronuz,
+    run_keyset("S&P 100 Tickers", ticker_phf, ticker_naive, ticker_frozen, ticker_kronuz, gperf_stock,
       {"AAPL","ABBV","ABT","ACN","ADBE","AIG","AMD","AMGN","AMT","AMZN",
        "AVGO","AXP","BA","BAC","BK","BKNG","BLK","BMY","C","CAT",
        "CHTR","CL","CMCSA","COF","COP","COST","CRM","CSCO","CVS","CVX",
@@ -663,7 +724,7 @@ int main(int argc, char *argv[]) {
 
   // --- C++ Keywords (15 keys, short-medium) ---
   if (filter.run_keyset("keyword")) {
-    run_keyset("C++ Keywords", keyword_phf, keyword_naive, keyword_frozen, keyword_kronuz,
+    run_keyset("C++ Keywords", keyword_phf, keyword_naive, keyword_frozen, keyword_kronuz, gperf_keyword,
       {"auto","bool","break","case","char","class","const",
        "do","double","else","enum","float","for","goto","if"},
       {"int","void","return","while","switch","struct","static",
@@ -673,7 +734,7 @@ int main(int argc, char *argv[]) {
 
   // --- HTTP Headers (20 keys, long) ---
   if (filter.run_keyset("header")) {
-    run_keyset("HTTP Headers", header_phf, header_naive, header_frozen, header_kronuz,
+    run_keyset("HTTP Headers", header_phf, header_naive, header_frozen, header_kronuz, gperf_header,
       {"Accept","Accept-Encoding","Authorization","Cache-Control",
        "Connection","Content-Length","Content-Type","Cookie",
        "Date","Host","If-None-Match","Location","Origin","Referer",
@@ -686,7 +747,7 @@ int main(int argc, char *argv[]) {
 
   // --- MIME Types (15 keys, long) ---
   if (filter.run_keyset("mime")) {
-    run_keyset("MIME Types", mime_phf, mime_naive, mime_frozen, mime_kronuz,
+    run_keyset("MIME Types", mime_phf, mime_naive, mime_frozen, mime_kronuz, gperf_mime,
       {"text/html","text/plain","text/css","application/json",
        "application/xml","application/pdf","application/zip",
        "image/png","image/jpeg","image/gif","image/webp",
