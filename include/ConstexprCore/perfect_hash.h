@@ -288,17 +288,16 @@ struct perfect_hash_set {
     }
 
     [[nodiscard]] constexpr constexprcore_really_inline bool contains(std::string_view key) const noexcept {
-        if (key.empty()) return false;
+        // Reject empty keys early only when no empty key exists in the set.
+        // min_key_len_ is a struct constant so this branch compiles away.
+        if (min_key_len_ > 0 && key.empty()) return false;
         auto len = key.size();
         // Clamp len to MaxKeyLen so compare_key_ never reads past MaxKeyLen bytes.
         // Out-of-range lengths will fail the len_ok check below.
         auto clamped_len = len <= MaxKeyLen ? len : MaxKeyLen;
         std::size_t slot = compute_hash(key);
-        // Single branch: fold range + length + key checks together.
-        // compute_hash is safe for any non-empty key. compare_key_ uses
-        // clamped_len so reads stay within MaxKeyLen bounds.
         bool len_ok = (slot_key_len_[slot] == static_cast<std::uint8_t>(len));
-        bool key_ok = compare_key_(key.data(), clamped_len, slot);
+        bool key_ok = len == 0 || compare_key_(key.data(), clamped_len, slot);
         return len_ok & key_ok;
     }
 
@@ -330,17 +329,12 @@ struct perfect_hash_set {
     }
 
     [[nodiscard]] constexpr constexprcore_really_inline std::optional<std::size_t> index_of(std::string_view key) const noexcept {
-        if (key.empty()) return std::nullopt;
+        if (min_key_len_ > 0 && key.empty()) return std::nullopt;
         auto len = key.size();
-        // Clamp len to MaxKeyLen so compare_key_ never reads past MaxKeyLen bytes.
-        // Out-of-range lengths will fail the len_ok check below.
         auto clamped_len = len <= MaxKeyLen ? len : MaxKeyLen;
         std::size_t slot = compute_hash(key);
-        // Single branch: fold range + length + key checks together.
-        // compute_hash is safe for any non-empty key. compare_key_ uses
-        // clamped_len so reads stay within MaxKeyLen bounds.
         bool len_ok = (slot_key_len_[slot] == static_cast<std::uint8_t>(len));
-        bool key_ok = compare_key_(key.data(), clamped_len, slot);
+        bool key_ok = len == 0 || compare_key_(key.data(), clamped_len, slot);
         if (!(len_ok & key_ok)) return std::nullopt;
         return static_cast<std::size_t>(slot_to_key_[slot]);
     }
