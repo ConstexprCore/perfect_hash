@@ -4,11 +4,20 @@
 #include <ConstexprCore/fixed_string.h>
 #include <ConstexprCore/detail/gperf_generator.h>
 #include <array>
+#include <stdexcept>
 #include <string_view>
 #include <optional>
 #include <tuple>
 #include <cstddef>
 #include <cstdint>
+
+#ifndef constexprcore_really_inline
+#if defined(_MSC_VER) && !defined(__clang__)
+#define constexprcore_really_inline __forceinline
+#else
+#define constexprcore_really_inline inline __attribute__((always_inline))
+#endif
+#endif
 
 namespace ConstexprCore {
 
@@ -269,7 +278,7 @@ struct perfect_hash_set {
     }
 
     [[nodiscard]] constexpr std::size_t compute_hash(std::string_view key) const noexcept {
-        if (num_positions_ == HD_MODE) {
+        if (num_positions_ == HD_MODE) {//shit
             // H&D mode: uses shared hd_bucket_hash + hd_key_hash from generator.
             std::size_t h = asso_values_[detail::hd_bucket_hash(key)] + detail::hd_key_hash(key);
             if constexpr (TABLE_SIZE_IS_POW2)
@@ -295,7 +304,7 @@ struct perfect_hash_set {
             return h % TableSize;
     }
 
-    [[nodiscard]] constexpr std::optional<std::size_t> index_of(std::string_view key) const noexcept {
+    [[nodiscard]] constexpr constexprcore_really_inline std::optional<std::size_t> index_of(std::string_view key) const noexcept {
         auto len = key.size();
         if (len < min_key_len_ || len > MaxKeyLen) return std::nullopt;
         std::size_t slot = compute_hash(key);
@@ -400,7 +409,7 @@ private:
     // Load byte at index idx if idx < len, otherwise 0, without branching.
     // Always loads from a valid address (falls back to p[0] when out of range).
     // Load byte at index idx if idx < len, otherwise 0, without branching.
-    [[nodiscard]] inline __attribute__((always_inline)) static constexpr uint64_t safe_byte(const char* p, std::size_t len, std::size_t idx) noexcept {
+    [[nodiscard]] constexprcore_really_inline static constexpr uint64_t safe_byte(const char* p, std::size_t len, std::size_t idx) noexcept {
         const std::size_t has_it = static_cast<std::size_t>(idx < len);   // 0 or 1
         const std::size_t safe_idx = idx & -has_it;                       // idx or 0
         const uint64_t byte_val = static_cast<unsigned char>(p[safe_idx]);
@@ -408,7 +417,7 @@ private:
     }
 
 
-    [[nodiscard]] inline __attribute__((always_inline)) static constexpr bool compare_key(const char* p, std::size_t len, std::size_t slot) noexcept {
+    [[nodiscard]] constexprcore_really_inline static constexpr bool compare_key(const char* p, std::size_t len, std::size_t slot) noexcept {
         if consteval {
             for (std::size_t i = 0; i < len; ++i)
                 if (p[i] != Keys[slot].data[i]) return false;
@@ -441,20 +450,20 @@ private:
     }
 
 public:
-    [[nodiscard]] inline __attribute__((always_inline)) constexpr bool contains(std::string_view key) const noexcept {
+    [[nodiscard]] constexpr constexprcore_really_inline bool contains(std::string_view key) const noexcept {
         std::size_t slot = compute_hash(key);
         if (slot >= TableSize || key.size() != lengths[slot]) return false;
         return compare_key(key.data(), key.size(), slot);
     }
 
-    [[nodiscard]] inline __attribute__((always_inline)) constexpr std::optional<std::size_t> index_of(std::string_view key) const noexcept {
+    [[nodiscard]] constexpr constexprcore_really_inline std::optional<std::size_t> index_of(std::string_view key) const noexcept {
         std::size_t slot = compute_hash(key);
         if (slot >= TableSize || key.size() != lengths[slot]) return std::nullopt;
         if (!compare_key(key.data(), key.size(), slot)) return std::nullopt;
         return static_cast<std::size_t>(KeyIndex[slot]);
     }
 
-    [[nodiscard]] inline __attribute__((always_inline)) constexpr std::optional<std::size_t> lookup(std::string_view key) const noexcept {
+    [[nodiscard]] constexpr constexprcore_really_inline std::optional<std::size_t> lookup(std::string_view key) const noexcept {
         return index_of(key);
     }
 };
@@ -489,7 +498,7 @@ struct perfect_hash_map {
         return set_.contains(key);
     }
 
-    [[nodiscard]] constexpr std::optional<ValueT> lookup(std::string_view key) const noexcept {
+    [[nodiscard]] constexpr constexprcore_really_inline std::optional<ValueT> lookup(std::string_view key) const noexcept {
         auto idx = set_.index_of(key);
         if (idx.has_value()) {
             return values_[*idx];
@@ -581,14 +590,14 @@ private:
     static constexpr auto packed_keys_ = make_packed_keys();
 
     // Load byte at index idx if idx < len, otherwise 0, without branching.
-    [[nodiscard]] inline __attribute__((always_inline)) static constexpr uint64_t safe_byte(const char* p, std::size_t len, std::size_t idx) noexcept {
+    [[nodiscard]] constexprcore_really_inline static constexpr uint64_t safe_byte(const char* p, std::size_t len, std::size_t idx) noexcept {
         const std::size_t has_it = static_cast<std::size_t>(idx < len);   // 0 or 1
         const std::size_t safe_idx = idx & -has_it;                       // idx or 0
         const uint64_t byte_val = static_cast<unsigned char>(p[safe_idx]);
         return byte_val & -static_cast<uint64_t>(has_it);                 // byte or 0
     }
 
-    [[nodiscard]] inline __attribute__((always_inline)) static constexpr bool compare_key(const char* p, std::size_t len, std::size_t slot) noexcept {
+    [[nodiscard]] constexprcore_really_inline static constexpr bool compare_key(const char* p, std::size_t len, std::size_t slot) noexcept {
         if consteval {
             for (std::size_t i = 0; i < len; ++i)
                 if (p[i] != Keys[slot].data[i]) return false;
@@ -621,20 +630,20 @@ private:
     }
 
 public:
-    [[nodiscard]] inline __attribute__((always_inline)) constexpr bool contains(std::string_view key) const noexcept {
+    [[nodiscard]] constexpr constexprcore_really_inline bool contains(std::string_view key) const noexcept {
         std::size_t slot = compute_hash(key);
         if (slot >= TableSize || key.size() != lengths[slot]) return false;
         return compare_key(key.data(), key.size(), slot);
     }
 
-    [[nodiscard]] inline __attribute__((always_inline)) constexpr std::optional<std::size_t> index_of(std::string_view key) const noexcept {
+    [[nodiscard]] constexpr constexprcore_really_inline std::optional<std::size_t> index_of(std::string_view key) const noexcept {
         std::size_t slot = compute_hash(key);
         if (slot >= TableSize || key.size() != lengths[slot]) return std::nullopt;
         if (!compare_key(key.data(), key.size(), slot)) return std::nullopt;
         return static_cast<std::size_t>(KeyIndex[slot]);
     }
 
-    [[nodiscard]] inline __attribute__((always_inline)) constexpr std::optional<ValueT> lookup(std::string_view key) const noexcept {
+    [[nodiscard]] constexpr constexprcore_really_inline std::optional<ValueT> lookup(std::string_view key) const noexcept {
         auto idx = index_of(key);
         if (idx.has_value()) {
             return Values[*idx];

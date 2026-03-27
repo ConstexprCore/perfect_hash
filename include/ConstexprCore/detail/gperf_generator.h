@@ -533,12 +533,26 @@ constexpr std::size_t hd_bucket_hash(std::string_view key) {
 
 // Per-key hash for Hash-and-Displace: polynomial of first 4 bytes + length.
 // Must match between generator (consteval) and runtime (compute_hash).
-constexpr std::size_t hd_key_hash(std::string_view key) {
-    std::size_t kc = key.size();
-    for (std::size_t i = 0; i < key.size() && i < 4; ++i)
-        kc = kc * 31 + static_cast<unsigned char>(key[i]);
-    return kc;
+constexpr std::size_t hd_key_hash(std::string_view key) noexcept {
+    const std::size_t len = key.size();
+    const char* p = key.data();
+    // Branchless safe byte loader (exactly as you suggested)
+    auto safe_byte = [&](std::size_t idx) noexcept -> std::uint64_t {
+        const std::size_t has_it = static_cast<std::size_t>(idx < len);
+        const std::size_t safe_idx = idx & (0-has_it);           // 0 or idx
+        const std::uint64_t byte_val = static_cast<unsigned char>(p[safe_idx]);
+        return byte_val & -has_it;                            // 0 or byte_val
+    };
+    // Pack up to 4 bytes (little-endian) — branchless
+
+    std::uint64_t v = len;
+    v = 31u * v + safe_byte(0);
+    v = 31u * v + safe_byte(1);
+    v = 31u * v + safe_byte(2);
+    v = 31u * v + safe_byte(3);
+    return v;
 }
+
 
 // ============================================================================
 // Hash-and-Displace generator: O(N) expected time, consteval-friendly.

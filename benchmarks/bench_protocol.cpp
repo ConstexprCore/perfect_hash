@@ -302,6 +302,11 @@ static constexpr auto ticker_phf =
         ConstexprCore::kv<"V",96>,ConstexprCore::kv<"VZ",97>,
         ConstexprCore::kv<"WFC",98>,ConstexprCore::kv<"WMT",99>>();
 
+// Left here intentionally for dissambly inspection of the generated code.
+std::optional<int> ticker_fancy(std::string_view s) {
+  return ticker_phf.lookup(s);
+}
+
 std::optional<int> ticker_naive(std::string_view s) {
   // Binary search for 100 keys
   static constexpr std::array<std::string_view, 100> sorted = []() {
