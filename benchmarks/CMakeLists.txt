@@ -31,9 +31,26 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(abseil-cpp)
 
+FetchContent_Declare(
+    frozen
+    GIT_REPOSITORY https://github.com/serge-sans-paille/frozen.git
+    GIT_TAG master
+)
+FetchContent_MakeAvailable(frozen)
+
+FetchContent_Declare(
+    constexpr_phf
+    GIT_REPOSITORY https://github.com/Kronuz/constexpr-phf.git
+    GIT_TAG master
+)
+FetchContent_Populate(constexpr_phf)
 
 add_executable(bench_protocol
     bench_protocol.cpp
+)
+
+target_include_directories(bench_protocol PRIVATE
+    ${constexpr_phf_SOURCE_DIR}
 )
 
 target_link_libraries(bench_protocol PRIVATE
@@ -41,6 +58,7 @@ target_link_libraries(bench_protocol PRIVATE
     counters::counters
     unordered_dense::unordered_dense
     absl::flat_hash_map
+    frozen::frozen
 )
 
 add_executable(phf_bench bench_lookup.cpp)

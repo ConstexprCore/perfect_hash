@@ -25,11 +25,15 @@
 #include <vector>
 #include <ankerl/unordered_dense.h>
 #include <absl/container/flat_hash_map.h>
+#include <frozen/unordered_map.h>
+#include <frozen/string.h>
+#include "phf.hh"
+#include "hashes.hh"
 
 // ============================================================================
 // Filter support: --filter hits,make_perfect_map,protocol
 //   Workloads: hits, misses, mixed
-//   Methods:   make_perfect_map, naive, unordered_map, ankerl, absl
+//   Methods:   make_perfect_map, naive, unordered_map, ankerl, absl, frozen, kronuz
 //   Keysets:   protocol, stock, keyword, header, mime
 // Omitting a category means "run all" for that category.
 // ============================================================================
@@ -53,7 +57,7 @@ struct BenchFilter {
 BenchFilter parse_filter(const std::string &arg) {
   BenchFilter f;
   static const std::set<std::string> valid_workloads = {"hits", "misses", "mixed"};
-  static const std::set<std::string> valid_methods = {"make_perfect_map", "naive", "unordered_map", "ankerl", "absl"};
+  static const std::set<std::string> valid_methods = {"make_perfect_map", "naive", "unordered_map", "ankerl", "absl", "frozen", "kronuz"};
   static const std::set<std::string> valid_keysets = {"protocol", "stock", "keyword", "header", "mime"};
 
   size_t start = 0;
@@ -121,13 +125,15 @@ std::vector<std::string_view> build_input(
 }
 
 // Generic benchmark: runs PHF, naive, and unordered_map on a given input vector.
-template <typename PHFMap, typename NaiveFn>
+template <typename PHFMap, typename NaiveFn, typename FrozenMap, typename KronuzPHF>
 void bench_workload(const std::string &label,
                     std::vector<std::string_view> &input,
                     size_t num_strings,
                     const PHFMap &phf_map,
                     NaiveFn naive_fn,
                     const std::unordered_map<std::string_view, int> &uset,
+                    const FrozenMap &frozen_map,
+                    const KronuzPHF &kronuz_phf,
                     const BenchFilter &filter) {
   std::vector<int> results(num_strings, 0);
   std::mt19937_64 gen(42);
@@ -209,13 +215,42 @@ void bench_workload(const std::string &label,
                  shuffle_bench(absmap_fn, shuffle));
     absmap.clear();
   }
+
+  // frozen::unordered_map (compile-time perfect hash)
+  if (filter.run_method("frozen")) {
+    gen.seed(42);
+    auto frozen_fn = [&]() {
+      for (size_t i = 0; i < input.size(); i++) {
+        auto it = frozen_map.find(frozen::string(input[i].data(), input[i].size()));
+        if (it != frozen_map.end()) results[i] = it->second;
+      }
+    };
+    pretty_print(label + " frozen::unordered_map", num_strings,
+                 shuffle_bench(frozen_fn, shuffle));
+  }
+
+  // Kronuz constexpr-phf (hash-based perfect hash)
+  if (filter.run_method("kronuz")) {
+    gen.seed(42);
+    auto kronuz_fn = [&]() {
+      for (size_t i = 0; i < input.size(); i++) {
+        auto h = fnv1ah32::hash(input[i].data(), input[i].size());
+        auto pos = kronuz_phf.find(h);
+        if (pos != phf::npos) results[i] = static_cast<int>(pos);
+      }
+    };
+    pretty_print(label + " kronuz::phf", num_strings,
+                 shuffle_bench(kronuz_fn, shuffle));
+  }
 }
 
 // Run a full key-set benchmark with all three workload modes.
-template <typename PHFMap, typename NaiveFn>
+template <typename PHFMap, typename NaiveFn, typename FrozenMap, typename KronuzPHF>
 void run_keyset(const std::string &name,
                 const PHFMap &phf_map,
                 NaiveFn naive_fn,
+                const FrozenMap &frozen_map,
+                const KronuzPHF &kronuz_phf,
                 const std::vector<std::string_view> &hit_keys,
                 const std::vector<std::string_view> &miss_keys,
                 const BenchFilter &filter,
@@ -244,15 +279,15 @@ void run_keyset(const std::string &name,
 
   if (filter.run_workload("hits")) {
     std::println("  --- all hits ---");
-    bench_workload("hits  ", hits, num_strings, phf_map, naive_fn, uset, filter);
+    bench_workload("hits  ", hits, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, filter);
   }
   if (filter.run_workload("misses")) {
     std::println("  --- all misses ---");
-    bench_workload("misses", misses, num_strings, phf_map, naive_fn, uset, filter);
+    bench_workload("misses", misses, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, filter);
   }
   if (filter.run_workload("mixed")) {
     std::println("  --- mixed (50/50) ---");
-    bench_workload("mixed ", mixed, num_strings, phf_map, naive_fn, uset, filter);
+    bench_workload("mixed ", mixed, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, filter);
   }
 }
 
@@ -270,6 +305,16 @@ static constexpr auto protocol_phf =
         ConstexprCore::kv<"ws", 3>,
         ConstexprCore::kv<"wss", 4>,
         ConstexprCore::kv<"file", 5>>();
+
+static constexpr frozen::unordered_map<frozen::string, int, 6> protocol_frozen = {
+    {"http", 0}, {"https", 1}, {"ftp", 2},
+    {"ws", 3}, {"wss", 4}, {"file", 5}
+};
+
+static constexpr auto protocol_kronuz = [] {
+  fnv1ah32 h{};
+  return phf::make_phf({h("http"), h("https"), h("ftp"), h("ws"), h("wss"), h("file")});
+}();
 
 std::optional<int> protocol_naive(std::string_view s) {
   if (s == "http") return 0;
@@ -340,6 +385,35 @@ static constexpr auto ticker_phf =
         ConstexprCore::kv<"V",96>,ConstexprCore::kv<"VZ",97>,
         ConstexprCore::kv<"WFC",98>,ConstexprCore::kv<"WMT",99>>();
 
+static constexpr frozen::unordered_map<frozen::string, int, 100> ticker_frozen = {
+    {"AAPL",0},{"ABBV",1},{"ABT",2},{"ACN",3},{"ADBE",4},{"AIG",5},{"AMD",6},{"AMGN",7},{"AMT",8},{"AMZN",9},
+    {"AVGO",10},{"AXP",11},{"BA",12},{"BAC",13},{"BK",14},{"BKNG",15},{"BLK",16},{"BMY",17},{"C",18},{"CAT",19},
+    {"CHTR",20},{"CL",21},{"CMCSA",22},{"COF",23},{"COP",24},{"COST",25},{"CRM",26},{"CSCO",27},{"CVS",28},{"CVX",29},
+    {"DE",30},{"DHR",31},{"DIS",32},{"DOW",33},{"DUK",34},{"EMR",35},{"EXC",36},{"F",37},{"FDX",38},{"GD",39},
+    {"GE",40},{"GILD",41},{"GM",42},{"GOOG",43},{"GS",44},{"HD",45},{"HON",46},{"IBM",47},{"INTC",48},{"INTU",49},
+    {"ISRG",50},{"JNJ",51},{"JPM",52},{"KHC",53},{"KO",54},{"LIN",55},{"LLY",56},{"LMT",57},{"LOW",58},{"MA",59},
+    {"MCD",60},{"MDLZ",61},{"MDT",62},{"MET",63},{"META",64},{"MMM",65},{"MO",66},{"MRK",67},{"MS",68},{"MSFT",69},
+    {"NEE",70},{"NFLX",71},{"NKE",72},{"NVDA",73},{"ORCL",74},{"PEP",75},{"PFE",76},{"PG",77},{"PM",78},{"PYPL",79},
+    {"QCOM",80},{"RTX",81},{"SBUX",82},{"SCHW",83},{"SO",84},{"SPG",85},{"T",86},{"TGT",87},{"TMO",88},{"TMUS",89},
+    {"TSLA",90},{"TXN",91},{"UNH",92},{"UNP",93},{"UPS",94},{"USB",95},{"V",96},{"VZ",97},{"WFC",98},{"WMT",99}
+};
+
+static constexpr auto ticker_kronuz = [] {
+  fnv1ah32 h{};
+  return phf::make_phf({
+    h("AAPL"),h("ABBV"),h("ABT"),h("ACN"),h("ADBE"),h("AIG"),h("AMD"),h("AMGN"),h("AMT"),h("AMZN"),
+    h("AVGO"),h("AXP"),h("BA"),h("BAC"),h("BK"),h("BKNG"),h("BLK"),h("BMY"),h("C"),h("CAT"),
+    h("CHTR"),h("CL"),h("CMCSA"),h("COF"),h("COP"),h("COST"),h("CRM"),h("CSCO"),h("CVS"),h("CVX"),
+    h("DE"),h("DHR"),h("DIS"),h("DOW"),h("DUK"),h("EMR"),h("EXC"),h("F"),h("FDX"),h("GD"),
+    h("GE"),h("GILD"),h("GM"),h("GOOG"),h("GS"),h("HD"),h("HON"),h("IBM"),h("INTC"),h("INTU"),
+    h("ISRG"),h("JNJ"),h("JPM"),h("KHC"),h("KO"),h("LIN"),h("LLY"),h("LMT"),h("LOW"),h("MA"),
+    h("MCD"),h("MDLZ"),h("MDT"),h("MET"),h("META"),h("MMM"),h("MO"),h("MRK"),h("MS"),h("MSFT"),
+    h("NEE"),h("NFLX"),h("NKE"),h("NVDA"),h("ORCL"),h("PEP"),h("PFE"),h("PG"),h("PM"),h("PYPL"),
+    h("QCOM"),h("RTX"),h("SBUX"),h("SCHW"),h("SO"),h("SPG"),h("T"),h("TGT"),h("TMO"),h("TMUS"),
+    h("TSLA"),h("TXN"),h("UNH"),h("UNP"),h("UPS"),h("USB"),h("V"),h("VZ"),h("WFC"),h("WMT")
+  });
+}();
+
 // Left here intentionally for dissambly inspection of the generated code.
 std::optional<int> ticker_fancy(std::string_view s) {
   return ticker_phf.lookup(s);
@@ -384,6 +458,23 @@ static constexpr auto keyword_phf =
         ConstexprCore::kv<"for", 12>,   ConstexprCore::kv<"goto", 13>,
         ConstexprCore::kv<"if", 14>>();
 
+static constexpr frozen::unordered_map<frozen::string, int, 15> keyword_frozen = {
+    {"auto", 0}, {"bool", 1}, {"break", 2}, {"case", 3},
+    {"char", 4}, {"class", 5}, {"const", 6}, {"do", 7},
+    {"double", 8}, {"else", 9}, {"enum", 10}, {"float", 11},
+    {"for", 12}, {"goto", 13}, {"if", 14}
+};
+
+static constexpr auto keyword_kronuz = [] {
+  fnv1ah32 h{};
+  return phf::make_phf({
+    h("auto"), h("bool"), h("break"), h("case"),
+    h("char"), h("class"), h("const"), h("do"),
+    h("double"), h("else"), h("enum"), h("float"),
+    h("for"), h("goto"), h("if")
+  });
+}();
+
 std::optional<int> keyword_naive(std::string_view s) {
   if (s == "auto") return 0;   if (s == "bool") return 1;
   if (s == "break") return 2;  if (s == "case") return 3;
@@ -423,6 +514,27 @@ static constexpr auto header_phf =
         ConstexprCore::kv<"Via", 18>,
         ConstexprCore::kv<"X-Forwarded-For", 19>>();
 
+static constexpr frozen::unordered_map<frozen::string, int, 20> header_frozen = {
+    {"Accept", 0}, {"Accept-Encoding", 1}, {"Authorization", 2},
+    {"Cache-Control", 3}, {"Connection", 4}, {"Content-Length", 5},
+    {"Content-Type", 6}, {"Cookie", 7}, {"Date", 8}, {"Host", 9},
+    {"If-None-Match", 10}, {"Location", 11}, {"Origin", 12},
+    {"Referer", 13}, {"Server", 14}, {"Set-Cookie", 15},
+    {"User-Agent", 16}, {"Vary", 17}, {"Via", 18}, {"X-Forwarded-For", 19}
+};
+
+static constexpr auto header_kronuz = [] {
+  fnv1ah32 h{};
+  return phf::make_phf({
+    h("Accept"), h("Accept-Encoding"), h("Authorization"),
+    h("Cache-Control"), h("Connection"), h("Content-Length"),
+    h("Content-Type"), h("Cookie"), h("Date"), h("Host"),
+    h("If-None-Match"), h("Location"), h("Origin"),
+    h("Referer"), h("Server"), h("Set-Cookie"),
+    h("User-Agent"), h("Vary"), h("Via"), h("X-Forwarded-For")
+  });
+}();
+
 std::optional<int> header_naive(std::string_view s) {
   if (s == "Accept") return 0;          if (s == "Accept-Encoding") return 1;
   if (s == "Authorization") return 2;   if (s == "Cache-Control") return 3;
@@ -459,6 +571,27 @@ static constexpr auto mime_phf =
         ConstexprCore::kv<"font/woff2", 13>,
         ConstexprCore::kv<"font/woff", 14>>();
 
+static constexpr frozen::unordered_map<frozen::string, int, 15> mime_frozen = {
+    {"text/html", 0}, {"text/plain", 1}, {"text/css", 2},
+    {"application/json", 3}, {"application/xml", 4},
+    {"application/pdf", 5}, {"application/zip", 6},
+    {"image/png", 7}, {"image/jpeg", 8}, {"image/gif", 9},
+    {"image/webp", 10}, {"audio/mpeg", 11}, {"video/mp4", 12},
+    {"font/woff2", 13}, {"font/woff", 14}
+};
+
+static constexpr auto mime_kronuz = [] {
+  fnv1ah32 h{};
+  return phf::make_phf({
+    h("text/html"), h("text/plain"), h("text/css"),
+    h("application/json"), h("application/xml"),
+    h("application/pdf"), h("application/zip"),
+    h("image/png"), h("image/jpeg"), h("image/gif"),
+    h("image/webp"), h("audio/mpeg"), h("video/mp4"),
+    h("font/woff2"), h("font/woff")
+  });
+}();
+
 std::optional<int> mime_naive(std::string_view s) {
   if (s == "text/html") return 0;         if (s == "text/plain") return 1;
   if (s == "text/css") return 2;           if (s == "application/json") return 3;
@@ -489,7 +622,7 @@ int main(int argc, char *argv[]) {
       std::println("  --help, -h         Show this help message\n");
       std::println("Filter tokens (mix and match):");
       std::println("  Workloads: hits, misses, mixed");
-      std::println("  Methods:   make_perfect_map, naive, unordered_map, ankerl, absl");
+      std::println("  Methods:   make_perfect_map, naive, unordered_map, ankerl, absl, frozen, kronuz");
       std::println("  Keysets:   protocol, stock, keyword, header, mime\n");
       std::println("Omitting a category runs all values for that category.\n");
       std::println("Examples:");
@@ -504,7 +637,7 @@ int main(int argc, char *argv[]) {
 
   // --- URL Protocols (6 keys, short) ---
   if (filter.run_keyset("protocol")) {
-    run_keyset("URL Protocols", protocol_phf, protocol_naive,
+    run_keyset("URL Protocols", protocol_phf, protocol_naive, protocol_frozen, protocol_kronuz,
       {"http","https","ftp","ws","wss","file"},
       {"ssh","telnet","mailto","data","blob","urn"},
       filter);
@@ -512,7 +645,7 @@ int main(int argc, char *argv[]) {
 
   // --- S&P 100 Stock Tickers (100 keys, short) ---
   if (filter.run_keyset("stock")) {
-    run_keyset("S&P 100 Tickers", ticker_phf, ticker_naive,
+    run_keyset("S&P 100 Tickers", ticker_phf, ticker_naive, ticker_frozen, ticker_kronuz,
       {"AAPL","ABBV","ABT","ACN","ADBE","AIG","AMD","AMGN","AMT","AMZN",
        "AVGO","AXP","BA","BAC","BK","BKNG","BLK","BMY","C","CAT",
        "CHTR","CL","CMCSA","COF","COP","COST","CRM","CSCO","CVS","CVX",
@@ -530,7 +663,7 @@ int main(int argc, char *argv[]) {
 
   // --- C++ Keywords (15 keys, short-medium) ---
   if (filter.run_keyset("keyword")) {
-    run_keyset("C++ Keywords", keyword_phf, keyword_naive,
+    run_keyset("C++ Keywords", keyword_phf, keyword_naive, keyword_frozen, keyword_kronuz,
       {"auto","bool","break","case","char","class","const",
        "do","double","else","enum","float","for","goto","if"},
       {"int","void","return","while","switch","struct","static",
@@ -540,7 +673,7 @@ int main(int argc, char *argv[]) {
 
   // --- HTTP Headers (20 keys, long) ---
   if (filter.run_keyset("header")) {
-    run_keyset("HTTP Headers", header_phf, header_naive,
+    run_keyset("HTTP Headers", header_phf, header_naive, header_frozen, header_kronuz,
       {"Accept","Accept-Encoding","Authorization","Cache-Control",
        "Connection","Content-Length","Content-Type","Cookie",
        "Date","Host","If-None-Match","Location","Origin","Referer",
@@ -553,7 +686,7 @@ int main(int argc, char *argv[]) {
 
   // --- MIME Types (15 keys, long) ---
   if (filter.run_keyset("mime")) {
-    run_keyset("MIME Types", mime_phf, mime_naive,
+    run_keyset("MIME Types", mime_phf, mime_naive, mime_frozen, mime_kronuz,
       {"text/html","text/plain","text/css","application/json",
        "application/xml","application/pdf","application/zip",
        "image/png","image/jpeg","image/gif","image/webp",
