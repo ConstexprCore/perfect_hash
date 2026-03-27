@@ -271,11 +271,10 @@ struct perfect_hash_set {
                         input_val = pack_input_(p, len);
                     }
                 }
-                if (input_val != packed_keys_[slot]) return false;
-                // Verify remaining bytes: branchless XOR accumulate with
-                // range masking to avoid branches per byte.
+                // Branchless: XOR first 8 bytes into diff, then accumulate
+                // remaining bytes. Single check at the end — no intermediate branch.
                 const char* a = slot_key_data_[slot].data();
-                std::uint64_t diff = 0;
+                std::uint64_t diff = input_val ^ packed_keys_[slot];
                 for (std::size_t i = 8; i < MaxKeyLen; ++i) {
                     std::uint64_t need = static_cast<std::uint64_t>(i < len);
                     std::uint64_t a_byte = static_cast<unsigned char>(a[i]);

@@ -611,6 +611,10 @@ static constexpr auto mime_phf =
         ConstexprCore::kv<"font/woff2", 13>,
         ConstexprCore::kv<"font/woff", 14>>();
 
+// Left here intentionally for dissambly inspection of the generated code.
+std::optional<int> mime_phf_lookup(std::string_view s) {
+  return mime_phf.lookup(s);
+}
 static constexpr frozen::unordered_map<frozen::string, int, 15> mime_frozen = {
     {"text/html", 0}, {"text/plain", 1}, {"text/css", 2},
     {"application/json", 3}, {"application/xml", 4},
