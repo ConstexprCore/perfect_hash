@@ -15,6 +15,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
+#include <format>
 #include <iostream>
 #include <optional>
 #include <print>
@@ -644,6 +645,100 @@ std::optional<int> mime_naive(std::string_view s) {
 }
 
 // ============================================================================
+// Verification
+// ============================================================================
+
+template <typename PHFMap, typename NaiveFn, typename FrozenMap, typename KronuzPHF, typename GperfFn>
+bool verify_keyset(const std::string &name,
+                   const PHFMap &phf_map,
+                   NaiveFn naive_fn,
+                   const FrozenMap &frozen_map,
+                   const KronuzPHF &kronuz_phf,
+                   GperfFn gperf_fn,
+                   const std::vector<std::string_view> &hit_keys,
+                   const std::vector<std::string_view> &miss_keys) {
+  bool ok = true;
+  auto fail = [&](const std::string &msg) {
+    std::println(stderr, "  FAIL [{}]: {}", name, msg);
+    ok = false;
+  };
+
+  // Build reference map
+  std::unordered_map<std::string_view, int> ref;
+  for (size_t i = 0; i < hit_keys.size(); i++)
+    ref[hit_keys[i]] = static_cast<int>(i);
+
+  // Mixed pool: all hits then all misses
+  std::vector<std::string_view> mixed_pool;
+  mixed_pool.insert(mixed_pool.end(), hit_keys.begin(), hit_keys.end());
+  mixed_pool.insert(mixed_pool.end(), miss_keys.begin(), miss_keys.end());
+
+  for (auto &key : mixed_pool) {
+    auto ref_it = ref.find(key);
+    bool is_hit = ref_it != ref.end();
+    int ref_val = is_hit ? ref_it->second : -1;
+
+    // make_perfect_map
+    auto phf_result = phf_map.lookup(key);
+    if (is_hit) {
+      if (!phf_result)
+        fail(std::format("make_perfect_map: missed hit key '{}'", key));
+      else if (static_cast<int>(*phf_result) != ref_val)
+        fail(std::format("make_perfect_map: key '{}' got {} expected {}", key, static_cast<int>(*phf_result), ref_val));
+    } else {
+      if (phf_result)
+        fail(std::format("make_perfect_map: false positive for miss key '{}'", key));
+    }
+
+    // naive
+    auto naive_result = naive_fn(key);
+    if (is_hit) {
+      if (!naive_result)
+        fail(std::format("naive: missed hit key '{}'", key));
+      else if (*naive_result != ref_val)
+        fail(std::format("naive: key '{}' got {} expected {}", key, *naive_result, ref_val));
+    } else {
+      if (naive_result)
+        fail(std::format("naive: false positive for miss key '{}'", key));
+    }
+
+    // frozen
+    auto frozen_it = frozen_map.find(frozen::string(key.data(), key.size()));
+    if (is_hit) {
+      if (frozen_it == frozen_map.end())
+        fail(std::format("frozen: missed hit key '{}'", key));
+      else if (frozen_it->second != ref_val)
+        fail(std::format("frozen: key '{}' got {} expected {}", key, frozen_it->second, ref_val));
+    } else {
+      if (frozen_it != frozen_map.end())
+        fail(std::format("frozen: false positive for miss key '{}'", key));
+    }
+
+    // kronuz (hash-based, only checks hit/miss — no value comparison)
+    auto kronuz_hash = fnv1ah32::hash(key.data(), key.size());
+    auto kronuz_pos = kronuz_phf.find(kronuz_hash);
+    if (is_hit) {
+      if (kronuz_pos == phf::npos)
+        fail(std::format("kronuz: missed hit key '{}'", key));
+    }
+    // Note: kronuz may false-positive on misses due to hash collisions — not checked
+
+    // gperf (returns first char of matched string, only checks hit/miss for value)
+    auto gperf_result = gperf_fn(key);
+    if (is_hit) {
+      if (!gperf_result)
+        fail(std::format("gperf: missed hit key '{}'", key));
+    } else {
+      if (gperf_result)
+        fail(std::format("gperf: false positive for miss key '{}'", key));
+    }
+  }
+
+  std::println("  {} {}", ok ? "OK" : "FAIL", name);
+  return ok;
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -652,12 +747,14 @@ int main(int argc, char *argv[]) {
     std::println("Performance counters not available, run with sudo.");
 
   BenchFilter filter;
+  bool verify = false;
   for (int i = 1; i < argc; i++) {
     std::string arg = argv[i];
     if (arg == "--help" || arg == "-h") {
       std::println("Usage: {} [OPTIONS]\n", argv[0]);
       std::println("Options:");
       std::println("  --filter <tokens>  Comma-separated list of filter tokens");
+      std::println("  --verify, -V       Verify all maps return correct results");
       std::println("  --help, -h         Show this help message\n");
       std::println("Filter tokens (mix and match):");
       std::println("  Workloads: hits, misses, mixed");
@@ -667,7 +764,11 @@ int main(int argc, char *argv[]) {
       std::println("Examples:");
       std::println("  {} --filter hits,make_perfect_map,protocol", argv[0]);
       std::println("  {} --filter hits,misses,stock", argv[0]);
+      std::println("  {} --verify", argv[0]);
       return 0;
+    }
+    if (arg == "--verify" || arg == "-V") {
+      verify = true;
     }
     if (arg == "--filter" && i + 1 < argc) {
       filter = parse_filter(argv[++i]);
@@ -695,6 +796,49 @@ int main(int argc, char *argv[]) {
     auto r = gperf_mime::MimeGperf::lookup(s.data(), s.size());
     return r ? std::optional<int>(static_cast<int>(r[0])) : std::nullopt;
   };
+
+  if (verify) {
+    std::println("\n=== Verification ===");
+    bool all_ok = true;
+    all_ok &= verify_keyset("URL Protocols", protocol_phf, protocol_naive, protocol_frozen, protocol_kronuz, gperf_protocol,
+      {"http","https","ftp","ws","wss","file"},
+      {"ssh","telnet","mailto","data","blob","urn"});
+    all_ok &= verify_keyset("S&P 100 Tickers", ticker_phf, ticker_naive, ticker_frozen, ticker_kronuz, gperf_stock,
+      {"AAPL","ABBV","ABT","ACN","ADBE","AIG","AMD","AMGN","AMT","AMZN",
+       "AVGO","AXP","BA","BAC","BK","BKNG","BLK","BMY","C","CAT",
+       "CHTR","CL","CMCSA","COF","COP","COST","CRM","CSCO","CVS","CVX",
+       "DE","DHR","DIS","DOW","DUK","EMR","EXC","F","FDX","GD",
+       "GE","GILD","GM","GOOG","GS","HD","HON","IBM","INTC","INTU",
+       "ISRG","JNJ","JPM","KHC","KO","LIN","LLY","LMT","LOW","MA",
+       "MCD","MDLZ","MDT","MET","META","MMM","MO","MRK","MS","MSFT",
+       "NEE","NFLX","NKE","NVDA","ORCL","PEP","PFE","PG","PM","PYPL",
+       "QCOM","RTX","SBUX","SCHW","SO","SPG","T","TGT","TMO","TMUS",
+       "TSLA","TXN","UNH","UNP","UPS","USB","V","VZ","WFC","WMT"},
+      {"RIVN","PLTR","SNAP","UBER","LYFT","COIN","HOOD","DKNG","SOFI","RBLX",
+       "ROKU","ZM","ABNB","DASH","CRWD","NET","SNOW","DDOG","MDB","PATH"});
+    all_ok &= verify_keyset("C++ Keywords", keyword_phf, keyword_naive, keyword_frozen, keyword_kronuz, gperf_keyword,
+      {"auto","bool","break","case","char","class","const",
+       "do","double","else","enum","float","for","goto","if"},
+      {"int","void","return","while","switch","struct","static",
+       "extern","inline","virtual","public","private","throw","try","catch"});
+    all_ok &= verify_keyset("HTTP Headers", header_phf, header_naive, header_frozen, header_kronuz, gperf_header,
+      {"Accept","Accept-Encoding","Authorization","Cache-Control",
+       "Connection","Content-Length","Content-Type","Cookie",
+       "Date","Host","If-None-Match","Location","Origin","Referer",
+       "Server","Set-Cookie","User-Agent","Vary","Via","X-Forwarded-For"},
+      {"X-Request-Id","Forwarded","Alt-Svc","DNT","Upgrade-Insecure-Requests",
+       "X-Frame-Options","Content-Security-Policy","Strict-Transport-Security",
+       "Pragma","Warning"});
+    all_ok &= verify_keyset("MIME Types", mime_phf, mime_naive, mime_frozen, mime_kronuz, gperf_mime,
+      {"text/html","text/plain","text/css","application/json",
+       "application/xml","application/pdf","application/zip",
+       "image/png","image/jpeg","image/gif","image/webp",
+       "audio/mpeg","video/mp4","font/woff2","font/woff"},
+      {"text/xml","text/csv","application/gzip","application/wasm",
+       "image/avif","image/tiff","audio/ogg","video/webm",
+       "font/otf","application/x-www-form-urlencoded"});
+    return all_ok ? 0 : 1;
+  }
 
   // --- URL Protocols (6 keys, short) ---
   if (filter.run_keyset("protocol")) {
