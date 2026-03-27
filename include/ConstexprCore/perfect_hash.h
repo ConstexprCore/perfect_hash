@@ -247,13 +247,30 @@ struct perfect_hash_set {
                 // since safe_byte_ uses conditional arithmetic (no branches).
                 return pack_input_(p, len) == packed_keys_[slot];
             } else {
-                // MaxKeyLen > 8: pack first 8 bytes as fast filter, then byte loop
-                std::uint64_t input_val = pack_input_(p, len);
+                // MaxKeyLen > 8: first 8 bytes as fast filter, then byte loop.
+                // Use direct memcpy when len >= 8 (1 insn vs 40 insn for safe_byte).
+                std::uint64_t input_val;
+                if consteval {
+                    input_val = pack_input_(p, len);
+                } else {
+                    if (len >= 8) {
+                        __builtin_memcpy(&input_val, p, 8);
+                    } else {
+                        input_val = pack_input_(p, len);
+                    }
+                }
                 if (input_val != packed_keys_[slot]) return false;
+                // Verify remaining bytes: branchless XOR accumulate with
+                // range masking to avoid branches per byte.
                 const char* a = slot_key_data_[slot].data();
-                for (std::size_t i = 8; i < len; ++i)
-                    if (a[i] != p[i]) return false;
-                return true;
+                std::uint64_t diff = 0;
+                for (std::size_t i = 8; i < MaxKeyLen; ++i) {
+                    std::uint64_t need = static_cast<std::uint64_t>(i < len);
+                    std::uint64_t a_byte = static_cast<unsigned char>(a[i]);
+                    std::uint64_t p_byte = safe_byte_(p, len, i);
+                    diff |= (a_byte ^ p_byte) & -need;
+                }
+                return diff == 0;
             }
         }
     }
