@@ -288,13 +288,18 @@ struct perfect_hash_set {
     }
 
     [[nodiscard]] constexpr constexprcore_really_inline bool contains(std::string_view key) const noexcept {
+        if (key.empty()) return false;
         auto len = key.size();
-        if (len < min_key_len_ || len > MaxKeyLen) return false;
-
-        // Unified path for both gperf and H&D modes
+        // Clamp len to MaxKeyLen so compare_key_ never reads past MaxKeyLen bytes.
+        // Out-of-range lengths will fail the len_ok check below.
+        auto clamped_len = len <= MaxKeyLen ? len : MaxKeyLen;
         std::size_t slot = compute_hash(key);
-        if (slot_key_len_[slot] != static_cast<std::uint8_t>(len)) return false;
-        return compare_key_(key.data(), len, slot);
+        // Single branch: fold range + length + key checks together.
+        // compute_hash is safe for any non-empty key. compare_key_ uses
+        // clamped_len so reads stay within MaxKeyLen bounds.
+        bool len_ok = (slot_key_len_[slot] == static_cast<std::uint8_t>(len));
+        bool key_ok = compare_key_(key.data(), clamped_len, slot);
+        return len_ok & key_ok;
     }
 
     [[nodiscard]] constexpr constexprcore_really_inline std::size_t compute_hash(std::string_view key) const noexcept {
@@ -325,11 +330,18 @@ struct perfect_hash_set {
     }
 
     [[nodiscard]] constexpr constexprcore_really_inline std::optional<std::size_t> index_of(std::string_view key) const noexcept {
+        if (key.empty()) return std::nullopt;
         auto len = key.size();
-        if (len < min_key_len_ || len > MaxKeyLen) return std::nullopt;
+        // Clamp len to MaxKeyLen so compare_key_ never reads past MaxKeyLen bytes.
+        // Out-of-range lengths will fail the len_ok check below.
+        auto clamped_len = len <= MaxKeyLen ? len : MaxKeyLen;
         std::size_t slot = compute_hash(key);
-        if (slot_key_len_[slot] != static_cast<std::uint8_t>(len)) return std::nullopt;
-        if (!compare_key_(key.data(), len, slot)) return std::nullopt;
+        // Single branch: fold range + length + key checks together.
+        // compute_hash is safe for any non-empty key. compare_key_ uses
+        // clamped_len so reads stay within MaxKeyLen bounds.
+        bool len_ok = (slot_key_len_[slot] == static_cast<std::uint8_t>(len));
+        bool key_ok = compare_key_(key.data(), clamped_len, slot);
+        if (!(len_ok & key_ok)) return std::nullopt;
         return static_cast<std::size_t>(slot_to_key_[slot]);
     }
 };
