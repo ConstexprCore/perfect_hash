@@ -248,12 +248,15 @@ struct perfect_hash_set {
                 return pack_input_(p, len) == packed_keys_[slot];
             } else {
                 // MaxKeyLen > 8: first 8 bytes as fast filter, then byte loop.
-                // Use direct memcpy when len >= 8 (1 insn vs 40 insn for safe_byte).
+                // Key insight: branch on struct-constant min_key_len_ (perfect
+                // prediction) instead of per-key len (data-dependent, mispredicts).
+                //   min_key_len >= 8: ALL keys have 8+ bytes → direct memcpy (1 insn)
+                //   min_key_len <  8: some keys are short → branchless safe_byte (0 BM)
                 std::uint64_t input_val;
                 if consteval {
                     input_val = pack_input_(p, len);
                 } else {
-                    if (len >= 8) {
+                    if (min_key_len_ >= 8) {
                         __builtin_memcpy(&input_val, p, 8);
                     } else {
                         input_val = pack_input_(p, len);
