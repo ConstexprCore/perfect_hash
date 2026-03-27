@@ -49,6 +49,15 @@ target_link_libraries(phf_bench PRIVATE
     benchmark::benchmark_main
 )
 
+add_executable(hunting_experiments ../perf_viz/hunting_experiments.cpp)
+target_link_libraries(hunting_experiments PRIVATE
+    ConstexprCore::perfect_hash
+    counters::counters
+)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(hunting_experiments PRIVATE -fconstexpr-steps=2147483647)
+endif()
+
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     message(WARNING "Building benchmarks in debug mode may affect performance measurements.")
 endif()
