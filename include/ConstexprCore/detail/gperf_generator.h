@@ -533,24 +533,21 @@ constexpr std::size_t hd_bucket_hash(std::string_view key) {
 
 // Per-key hash for Hash-and-Displace: polynomial of first 4 bytes + length.
 // Must match between generator (consteval) and runtime (compute_hash).
-constexpr std::size_t hd_key_hash(std::string_view key) noexcept {
-    const std::size_t len = key.size();
-    const char* p = key.data();
-    // Branchless safe byte loader (exactly as you suggested)
-    auto safe_byte = [&](std::size_t idx) noexcept -> std::uint64_t {
-        const std::size_t has_it = static_cast<std::size_t>(idx < len);
-        const std::size_t safe_idx = idx & (0-has_it);           // 0 or idx
-        const std::uint64_t byte_val = static_cast<unsigned char>(p[safe_idx]);
-        return byte_val & -has_it;                            // 0 or byte_val
+constexpr std::size_t hd_key_hash(std::string_view key) {
+    // Branchless: always hash exactly 4 bytes, using 0 for out-of-range positions.
+    // At consteval this is just a loop; at runtime the compiler can unroll without
+    // length-dependent branches.
+    auto safe_char = [](const char* p, std::size_t len, std::size_t idx) -> std::size_t {
+        std::size_t has = static_cast<std::size_t>(idx < len);
+        std::size_t si = idx & -has;
+        return static_cast<unsigned char>(p[si]) & -has;
     };
-    // Pack up to 4 bytes (little-endian) — branchless
-
-    std::uint64_t v = len;
-    v = 31u * v + safe_byte(0);
-    v = 31u * v + safe_byte(1);
-    v = 31u * v + safe_byte(2);
-    v = 31u * v + safe_byte(3);
-    return v;
+    std::size_t kc = key.size();
+    kc = kc * 31 + static_cast<unsigned char>(key[0]); // byte 0 always valid (len >= 1)
+    kc = kc * 31 + safe_char(key.data(), key.size(), 1);
+    kc = kc * 31 + safe_char(key.data(), key.size(), 2);
+    kc = kc * 31 + safe_char(key.data(), key.size(), 3);
+    return kc;
 }
 
 

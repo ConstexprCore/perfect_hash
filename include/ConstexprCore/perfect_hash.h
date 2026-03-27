@@ -227,7 +227,7 @@ struct perfect_hash_set {
     //    Packs up to 8 bytes branchlessly into uint64 using conditional indexing.
     //
     // 3. Byte-by-byte loop: for MaxKeyLen > 8 or consteval context.
-    [[nodiscard]] constexpr bool compare_key_(
+    [[nodiscard]] constexpr constexprcore_really_inline bool compare_key_(
         const char* p, std::size_t len, std::size_t slot) const noexcept {
         if consteval {
             // consteval: byte-by-byte (no intrinsics)
@@ -256,18 +256,38 @@ struct perfect_hash_set {
                 // since safe_byte_ uses conditional arithmetic (no branches).
                 return pack_input_(p, len) == packed_keys_[slot];
             } else {
-                // MaxKeyLen > 8: pack first 8 bytes as fast filter, then byte loop
-                std::uint64_t input_val = pack_input_(p, len);
+                // MaxKeyLen > 8: first 8 bytes as fast filter, then byte loop.
+                // Key insight: branch on struct-constant min_key_len_ (perfect
+                // prediction) instead of per-key len (data-dependent, mispredicts).
+                //   min_key_len >= 8: ALL keys have 8+ bytes → direct memcpy (1 insn)
+                //   min_key_len <  8: some keys are short → branchless safe_byte (0 BM)
+                std::uint64_t input_val;
+                if consteval {
+                    input_val = pack_input_(p, len);
+                } else {
+                    if (min_key_len_ >= 8) {
+                        __builtin_memcpy(&input_val, p, 8);
+                    } else {
+                        input_val = pack_input_(p, len);
+                    }
+                }
                 if (input_val != packed_keys_[slot]) return false;
+                // Verify remaining bytes: branchless XOR accumulate with
+                // range masking to avoid branches per byte.
                 const char* a = slot_key_data_[slot].data();
-                for (std::size_t i = 8; i < len; ++i)
-                    if (a[i] != p[i]) return false;
-                return true;
+                std::uint64_t diff = 0;
+                for (std::size_t i = 8; i < MaxKeyLen; ++i) {
+                    std::uint64_t need = static_cast<std::uint64_t>(i < len);
+                    std::uint64_t a_byte = static_cast<unsigned char>(a[i]);
+                    std::uint64_t p_byte = safe_byte_(p, len, i);
+                    diff |= (a_byte ^ p_byte) & -need;
+                }
+                return diff == 0;
             }
         }
     }
 
-    [[nodiscard]] constexpr bool contains(std::string_view key) const noexcept {
+    [[nodiscard]] constexpr constexprcore_really_inline bool contains(std::string_view key) const noexcept {
         auto len = key.size();
         if (len < min_key_len_ || len > MaxKeyLen) return false;
 
@@ -277,8 +297,8 @@ struct perfect_hash_set {
         return compare_key_(key.data(), len, slot);
     }
 
-    [[nodiscard]] constexpr std::size_t compute_hash(std::string_view key) const noexcept {
-        if (num_positions_ == HD_MODE) {//shit
+    [[nodiscard]] constexpr constexprcore_really_inline std::size_t compute_hash(std::string_view key) const noexcept {
+        if (num_positions_ == HD_MODE) {
             // H&D mode: uses shared hd_bucket_hash + hd_key_hash from generator.
             std::size_t h = asso_values_[detail::hd_bucket_hash(key)] + detail::hd_key_hash(key);
             if constexpr (TABLE_SIZE_IS_POW2)
@@ -366,7 +386,7 @@ struct constexpr_perfect_hash_set {
         return original_keys_[i];
     }
 
-    [[nodiscard]] constexpr std::size_t compute_hash(std::string_view key) const noexcept {
+    [[nodiscard]] constexpr constexprcore_really_inline std::size_t compute_hash(std::string_view key) const noexcept {
         std::size_t h = key.size();
         for (std::size_t i = 0; i < NumPositions; ++i) {
             std::size_t ch = detail::char_at(key, Positions[i]);
@@ -494,7 +514,7 @@ struct perfect_hash_map {
 
     [[nodiscard]] constexpr std::size_t table_size() const noexcept { return TableSize; }
 
-    [[nodiscard]] constexpr bool contains(std::string_view key) const noexcept {
+    [[nodiscard]] constexpr constexprcore_really_inline bool contains(std::string_view key) const noexcept {
         return set_.contains(key);
     }
 
@@ -549,7 +569,7 @@ struct constexpr_perfect_hash_map {
         return original_keys_[i];
     }
 
-    [[nodiscard]] constexpr std::size_t compute_hash(std::string_view key) const noexcept {
+    [[nodiscard]] constexpr constexprcore_really_inline std::size_t compute_hash(std::string_view key) const noexcept {
         std::size_t h = key.size();
         for (std::size_t i = 0; i < NumPositions; ++i) {
             std::size_t ch = detail::char_at(key, Positions[i]);

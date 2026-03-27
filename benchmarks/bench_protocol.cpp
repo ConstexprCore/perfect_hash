@@ -23,19 +23,21 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include <ankerl/unordered_dense.h>
+#include <absl/container/flat_hash_map.h>
 
 // ============================================================================
 // Filter support: --filter hits,make_perfect_map,protocol
 //   Workloads: hits, misses, mixed
-//   Methods:   make_perfect_map, naive, unordered_map
-//   Keysets:   protocol, stock
+//   Methods:   make_perfect_map, naive, unordered_map, ankerl, absl
+//   Keysets:   protocol, stock, keyword, header, mime
 // Omitting a category means "run all" for that category.
 // ============================================================================
 
 struct BenchFilter {
   std::set<std::string> workloads; // hits, misses, mixed
   std::set<std::string> methods;   // make_perfect_map, naive, unordered_map
-  std::set<std::string> keysets;   // protocol, stock
+  std::set<std::string> keysets;   // protocol, stock, keyword, header, mime
 
   bool run_workload(const std::string &w) const {
     return workloads.empty() || workloads.count(w);
@@ -51,8 +53,8 @@ struct BenchFilter {
 BenchFilter parse_filter(const std::string &arg) {
   BenchFilter f;
   static const std::set<std::string> valid_workloads = {"hits", "misses", "mixed"};
-  static const std::set<std::string> valid_methods = {"make_perfect_map", "naive", "unordered_map"};
-  static const std::set<std::string> valid_keysets = {"protocol", "stock"};
+  static const std::set<std::string> valid_methods = {"make_perfect_map", "naive", "unordered_map", "ankerl", "absl"};
+  static const std::set<std::string> valid_keysets = {"protocol", "stock", "keyword", "header", "mime"};
 
   size_t start = 0;
   while (start < arg.size()) {
@@ -170,6 +172,42 @@ void bench_workload(const std::string &label,
     };
     pretty_print(label + " std::unordered_map", num_strings,
                  shuffle_bench(uset_fn, shuffle));
+  }
+
+  // ankerl::unordered_dense (fast flat hash map)
+  if (filter.run_method("ankerl")) {
+    static thread_local ankerl::unordered_dense::map<std::string_view, int> amap;
+    if (amap.empty()) {
+      for (auto& [k, v] : uset) amap[k] = v;
+    }
+    gen.seed(42);
+    auto amap_fn = [&]() {
+      for (size_t i = 0; i < input.size(); i++) {
+        auto it = amap.find(input[i]);
+        if (it != amap.end()) results[i] = it->second;
+      }
+    };
+    pretty_print(label + " ankerl::dense", num_strings,
+                 shuffle_bench(amap_fn, shuffle));
+    amap.clear();
+  }
+
+  // absl::flat_hash_map (Google's SwissTable)
+  if (filter.run_method("absl")) {
+    static thread_local absl::flat_hash_map<std::string_view, int> absmap;
+    if (absmap.empty()) {
+      for (auto& [k, v] : uset) absmap[k] = v;
+    }
+    gen.seed(42);
+    auto absmap_fn = [&]() {
+      for (size_t i = 0; i < input.size(); i++) {
+        auto it = absmap.find(input[i]);
+        if (it != absmap.end()) results[i] = it->second;
+      }
+    };
+    pretty_print(label + " absl::flat_hash_map", num_strings,
+                 shuffle_bench(absmap_fn, shuffle));
+    absmap.clear();
   }
 }
 
@@ -332,6 +370,108 @@ std::optional<int> ticker_naive(std::string_view s) {
 }
 
 // ============================================================================
+// Key set 3: C++ Keywords (15 keys, MaxKeyLen=6) — gperf mode
+// ============================================================================
+
+static constexpr auto keyword_phf =
+    ConstexprCore::make_perfect_map<
+        ConstexprCore::kv<"auto", 0>,   ConstexprCore::kv<"bool", 1>,
+        ConstexprCore::kv<"break", 2>,  ConstexprCore::kv<"case", 3>,
+        ConstexprCore::kv<"char", 4>,   ConstexprCore::kv<"class", 5>,
+        ConstexprCore::kv<"const", 6>,  ConstexprCore::kv<"do", 7>,
+        ConstexprCore::kv<"double", 8>, ConstexprCore::kv<"else", 9>,
+        ConstexprCore::kv<"enum", 10>,  ConstexprCore::kv<"float", 11>,
+        ConstexprCore::kv<"for", 12>,   ConstexprCore::kv<"goto", 13>,
+        ConstexprCore::kv<"if", 14>>();
+
+std::optional<int> keyword_naive(std::string_view s) {
+  if (s == "auto") return 0;   if (s == "bool") return 1;
+  if (s == "break") return 2;  if (s == "case") return 3;
+  if (s == "char") return 4;   if (s == "class") return 5;
+  if (s == "const") return 6;  if (s == "do") return 7;
+  if (s == "double") return 8; if (s == "else") return 9;
+  if (s == "enum") return 10;  if (s == "float") return 11;
+  if (s == "for") return 12;   if (s == "goto") return 13;
+  if (s == "if") return 14;
+  return std::nullopt;
+}
+
+// ============================================================================
+// Key set 4: HTTP Headers (20 keys, MaxKeyLen=17) — H&D mode
+// ============================================================================
+
+static constexpr auto header_phf =
+    ConstexprCore::make_perfect_map<
+        ConstexprCore::kv<"Accept", 0>,
+        ConstexprCore::kv<"Accept-Encoding", 1>,
+        ConstexprCore::kv<"Authorization", 2>,
+        ConstexprCore::kv<"Cache-Control", 3>,
+        ConstexprCore::kv<"Connection", 4>,
+        ConstexprCore::kv<"Content-Length", 5>,
+        ConstexprCore::kv<"Content-Type", 6>,
+        ConstexprCore::kv<"Cookie", 7>,
+        ConstexprCore::kv<"Date", 8>,
+        ConstexprCore::kv<"Host", 9>,
+        ConstexprCore::kv<"If-None-Match", 10>,
+        ConstexprCore::kv<"Location", 11>,
+        ConstexprCore::kv<"Origin", 12>,
+        ConstexprCore::kv<"Referer", 13>,
+        ConstexprCore::kv<"Server", 14>,
+        ConstexprCore::kv<"Set-Cookie", 15>,
+        ConstexprCore::kv<"User-Agent", 16>,
+        ConstexprCore::kv<"Vary", 17>,
+        ConstexprCore::kv<"Via", 18>,
+        ConstexprCore::kv<"X-Forwarded-For", 19>>();
+
+std::optional<int> header_naive(std::string_view s) {
+  if (s == "Accept") return 0;          if (s == "Accept-Encoding") return 1;
+  if (s == "Authorization") return 2;   if (s == "Cache-Control") return 3;
+  if (s == "Connection") return 4;      if (s == "Content-Length") return 5;
+  if (s == "Content-Type") return 6;    if (s == "Cookie") return 7;
+  if (s == "Date") return 8;            if (s == "Host") return 9;
+  if (s == "If-None-Match") return 10;  if (s == "Location") return 11;
+  if (s == "Origin") return 12;         if (s == "Referer") return 13;
+  if (s == "Server") return 14;         if (s == "Set-Cookie") return 15;
+  if (s == "User-Agent") return 16;     if (s == "Vary") return 17;
+  if (s == "Via") return 18;            if (s == "X-Forwarded-For") return 19;
+  return std::nullopt;
+}
+
+// ============================================================================
+// Key set 5: MIME Types (15 keys, MaxKeyLen=24) — gperf mode (N=15)
+// ============================================================================
+
+static constexpr auto mime_phf =
+    ConstexprCore::make_perfect_map<
+        ConstexprCore::kv<"text/html", 0>,
+        ConstexprCore::kv<"text/plain", 1>,
+        ConstexprCore::kv<"text/css", 2>,
+        ConstexprCore::kv<"application/json", 3>,
+        ConstexprCore::kv<"application/xml", 4>,
+        ConstexprCore::kv<"application/pdf", 5>,
+        ConstexprCore::kv<"application/zip", 6>,
+        ConstexprCore::kv<"image/png", 7>,
+        ConstexprCore::kv<"image/jpeg", 8>,
+        ConstexprCore::kv<"image/gif", 9>,
+        ConstexprCore::kv<"image/webp", 10>,
+        ConstexprCore::kv<"audio/mpeg", 11>,
+        ConstexprCore::kv<"video/mp4", 12>,
+        ConstexprCore::kv<"font/woff2", 13>,
+        ConstexprCore::kv<"font/woff", 14>>();
+
+std::optional<int> mime_naive(std::string_view s) {
+  if (s == "text/html") return 0;         if (s == "text/plain") return 1;
+  if (s == "text/css") return 2;           if (s == "application/json") return 3;
+  if (s == "application/xml") return 4;    if (s == "application/pdf") return 5;
+  if (s == "application/zip") return 6;    if (s == "image/png") return 7;
+  if (s == "image/jpeg") return 8;         if (s == "image/gif") return 9;
+  if (s == "image/webp") return 10;        if (s == "audio/mpeg") return 11;
+  if (s == "video/mp4") return 12;         if (s == "font/woff2") return 13;
+  if (s == "font/woff") return 14;
+  return std::nullopt;
+}
+
+// ============================================================================
 // Main
 // ============================================================================
 
@@ -349,8 +489,8 @@ int main(int argc, char *argv[]) {
       std::println("  --help, -h         Show this help message\n");
       std::println("Filter tokens (mix and match):");
       std::println("  Workloads: hits, misses, mixed");
-      std::println("  Methods:   make_perfect_map, naive, unordered_map");
-      std::println("  Keysets:   protocol, stock\n");
+      std::println("  Methods:   make_perfect_map, naive, unordered_map, ankerl, absl");
+      std::println("  Keysets:   protocol, stock, keyword, header, mime\n");
       std::println("Omitting a category runs all values for that category.\n");
       std::println("Examples:");
       std::println("  {} --filter hits,make_perfect_map,protocol", argv[0]);
@@ -385,6 +525,42 @@ int main(int argc, char *argv[]) {
        "TSLA","TXN","UNH","UNP","UPS","USB","V","VZ","WFC","WMT"},
       {"RIVN","PLTR","SNAP","UBER","LYFT","COIN","HOOD","DKNG","SOFI","RBLX",
        "ROKU","ZM","ABNB","DASH","CRWD","NET","SNOW","DDOG","MDB","PATH"},
+      filter);
+  }
+
+  // --- C++ Keywords (15 keys, short-medium) ---
+  if (filter.run_keyset("keyword")) {
+    run_keyset("C++ Keywords", keyword_phf, keyword_naive,
+      {"auto","bool","break","case","char","class","const",
+       "do","double","else","enum","float","for","goto","if"},
+      {"int","void","return","while","switch","struct","static",
+       "extern","inline","virtual","public","private","throw","try","catch"},
+      filter);
+  }
+
+  // --- HTTP Headers (20 keys, long) ---
+  if (filter.run_keyset("header")) {
+    run_keyset("HTTP Headers", header_phf, header_naive,
+      {"Accept","Accept-Encoding","Authorization","Cache-Control",
+       "Connection","Content-Length","Content-Type","Cookie",
+       "Date","Host","If-None-Match","Location","Origin","Referer",
+       "Server","Set-Cookie","User-Agent","Vary","Via","X-Forwarded-For"},
+      {"X-Request-Id","Forwarded","Alt-Svc","DNT","Upgrade-Insecure-Requests",
+       "X-Frame-Options","Content-Security-Policy","Strict-Transport-Security",
+       "Pragma","Warning"},
+      filter);
+  }
+
+  // --- MIME Types (15 keys, long) ---
+  if (filter.run_keyset("mime")) {
+    run_keyset("MIME Types", mime_phf, mime_naive,
+      {"text/html","text/plain","text/css","application/json",
+       "application/xml","application/pdf","application/zip",
+       "image/png","image/jpeg","image/gif","image/webp",
+       "audio/mpeg","video/mp4","font/woff2","font/woff"},
+      {"text/xml","text/csv","application/gzip","application/wasm",
+       "image/avif","image/tiff","audio/ogg","video/webm",
+       "font/otf","application/x-www-form-urlencoded"},
       filter);
   }
 }
