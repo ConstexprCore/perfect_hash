@@ -118,3 +118,31 @@ Combined with the overlap comparison (2 halfword loads), this is the theoretical
 4. **Never use NEON for single-lookup string comparison** (Exp D). The scalar pipeline with branchless `safe_byte` consistently beats NEON due to the scalar→vector→scalar transfer cost.
 
 5. **Never replace branchless loops with branchy ones** (Exp C). Even if the branchy version has fewer instructions, the branch misses (0.94 BM) cost more than the extra branchless instructions.
+
+## Follow-up: Integration Attempts
+
+### Attempt 1: Pipelining loads in contains() (Exp F)
+
+Pre-loaded `packed_keys_[slot]` before the length check to overlap memory latency with comparison computation. **Result: no measurable improvement.** The M3's OoO engine (600-instruction window) already speculates past the length check and starts the packed_keys load. Explicit pipelining in C++ source code is redundant on modern OoO cores.
+
+### Attempt 2: Overlap-is-unique runtime flag
+
+Added a `bool overlap_is_unique_` flag computed at consteval time. When overlap encoding is collision-free (true for protocols, tickers, keywords), use the fast 2-LDRH comparison instead of safe_byte.
+
+**Result: mixed.**
+- Protocols: 1.97 → 1.71 ns (-13%) ✅
+- Keywords: 2.66 → 3.16 ns (+19%) ❌
+
+The `if (overlap_is_unique_)` branch is a **runtime** check that the compiler can't eliminate, even for `static constexpr` structs. The compiler generates both code paths, reducing IPC from 8.7 to 5.7. The branch itself is well-predicted but the code bloat hurts.
+
+**Lesson**: Runtime dispatch on struct member values is counterproductive even when the branch is perfectly predicted. The extra code size reduces IPC on wide OoO cores. Only `if constexpr` on template parameters gives zero-cost dispatch.
+
+### Remaining gap analysis
+
+The theoretical floor (Exp B/F) is 0.92-0.98 ns for protocols (30-33 insn). The library achieves 1.97 ns (72 insn). The 39-42 instruction gap comes from:
+- safe_byte pack (24 insn) vs overlap LDRH (6 insn): +18 insn
+- Generic compute_hash position loop vs inline: +8 insn
+- optional<> wrapping in lookup(): +5 insn
+- Function call overhead: +8 insn
+
+Closing this requires compile-time specialization (NTTP) which is Lemire's `constexpr_perfect_map` approach. The struct-based `perfect_hash_set` cannot achieve the NTTP performance because member values aren't constant-propagated.
