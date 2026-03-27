@@ -11,20 +11,6 @@
 #include <cstddef>
 #include <cstdint>
 
-#include <print>
-// Main print function
-template<typename... Args>
-constexpr void print(Args&&... args)
-{
-    if consteval {
-        // Compile-time: do nothing
-        return;
-    } else {
-        // Runtime: actually print
-        std::print(std::forward<Args>(args)...);
-    }
-}
-
 #ifndef constexprcore_really_inline
 #if defined(_MSC_VER) && !defined(__clang__)
 #define constexprcore_really_inline __forceinline
