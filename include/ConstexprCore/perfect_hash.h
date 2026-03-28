@@ -276,10 +276,9 @@ struct perfect_hash_set {
                 const char* a = slot_key_data_[slot].data();
                 std::uint64_t diff = input_val ^ packed_keys_[slot];
                 for (std::size_t i = 8; i < MaxKeyLen; ++i) {
-                    std::uint64_t need = static_cast<std::uint64_t>(i < len);
                     std::uint64_t a_byte = static_cast<unsigned char>(a[i]);
                     std::uint64_t p_byte = safe_byte_(p, len, i);
-                    diff |= (a_byte ^ p_byte) & -need;
+                    diff |= (a_byte ^ p_byte);
                 }
                 return diff == 0;
             }

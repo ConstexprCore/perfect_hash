@@ -554,6 +554,10 @@ static constexpr auto header_phf =
         ConstexprCore::kv<"Via", 18>,
         ConstexprCore::kv<"X-Forwarded-For", 19>>();
 
+std::optional<int> header_fancy(std::string_view s) {
+  return header_phf.lookup(s);
+}
+
 static constexpr frozen::unordered_map<frozen::string, int, 20> header_frozen = {
     {"Accept", 0}, {"Accept-Encoding", 1}, {"Authorization", 2},
     {"Cache-Control", 3}, {"Connection", 4}, {"Content-Length", 5},
