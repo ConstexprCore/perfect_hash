@@ -186,6 +186,10 @@ struct perfect_hash_set {
 
     [[nodiscard]] constexpr std::size_t table_size() const noexcept { return TableSize; }
 
+    [[nodiscard]] constexpr std::string_view algorithm_name() const noexcept {
+        return num_positions_ == HD_MODE ? std::string_view("H&D") : std::string_view("gperf");
+    }
+
     [[nodiscard]] constexpr std::string_view key_at(std::size_t i) const noexcept {
         std::uint8_t slot = key_to_slot_[i];
         return std::string_view(slot_key_data_[slot].data(), slot_key_len_[slot]);
@@ -363,6 +367,10 @@ struct perfect_hash_map {
     [[nodiscard]] constexpr std::size_t size() const noexcept { return N; }
 
     [[nodiscard]] constexpr std::size_t table_size() const noexcept { return TableSize; }
+
+    [[nodiscard]] constexpr std::string_view algorithm_name() const noexcept {
+        return set_.algorithm_name();
+    }
 
     [[nodiscard]] constexpr constexprcore_really_inline bool contains(std::string_view key) const noexcept {
         return set_.contains(key);

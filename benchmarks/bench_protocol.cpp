@@ -168,7 +168,7 @@ void bench_workload(const std::string &label,
         if (opt) results[i] = static_cast<int>(*opt);
       }
     };
-    pretty_print(label + " make_perfect_map", num_strings,
+    pretty_print(label + " make_perfect_map (" + std::string(phf_map.algorithm_name()) + ")", num_strings,
                  shuffle_bench(phf_fn, shuffle));
     volatile auto sum = std::accumulate(results.begin(), results.end(), 0); // prevent optimization
   }
