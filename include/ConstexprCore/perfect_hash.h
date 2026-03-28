@@ -49,6 +49,7 @@ struct perfect_hash_set {
     std::array<std::uint8_t, TableSize> slot_key_len_{};                    // key length (0xFF = empty)
     std::array<std::array<char, MaxKeyLen>, TableSize> slot_key_data_{};    // inline key bytes
     std::array<std::uint64_t, TableSize> packed_keys_{};                    // first 8 bytes packed for branchless cmp
+    std::array<std::uint64_t, TableSize> packed_keys2_{};                   // bytes 8-15 packed (MaxKeyLen > 8)
 
     // --- cold data (rarely accessed) ---
     std::array<std::uint8_t, TableSize> slot_to_key_{};     // hash_slot -> declaration-order index
@@ -105,6 +106,11 @@ struct perfect_hash_set {
                     for (std::size_t c = 0; c < k.size() && c < 8; ++c)
                         p |= static_cast<std::uint64_t>(static_cast<unsigned char>(k[c])) << (c * 8);
                     packed_keys_[s] = p;
+                    // Bytes 8-15 packed for branchless two-word comparison.
+                    std::uint64_t p2 = 0;
+                    for (std::size_t c = 8; c < k.size() && c < 16; ++c)
+                        p2 |= static_cast<std::uint64_t>(static_cast<unsigned char>(k[c])) << ((c - 8) * 8);
+                    packed_keys2_[s] = p2;
                 }
             }
         }
@@ -241,6 +247,21 @@ struct perfect_hash_set {
         return v;
     }
 
+    // Pack key bytes 8-15 into a uint64, zero-padded. Branchless.
+    [[nodiscard]] static constexpr std::uint64_t pack_input_upper_(
+        const char* p, std::size_t len) noexcept {
+        std::uint64_t v = 0;
+        if constexpr (MaxKeyLen >= 9)  v |= safe_byte_(p, len, 8);
+        if constexpr (MaxKeyLen >= 10) v |= safe_byte_(p, len, 9)  << 8;
+        if constexpr (MaxKeyLen >= 11) v |= safe_byte_(p, len, 10) << 16;
+        if constexpr (MaxKeyLen >= 12) v |= safe_byte_(p, len, 11) << 24;
+        if constexpr (MaxKeyLen >= 13) v |= safe_byte_(p, len, 12) << 32;
+        if constexpr (MaxKeyLen >= 14) v |= safe_byte_(p, len, 13) << 40;
+        if constexpr (MaxKeyLen >= 15) v |= safe_byte_(p, len, 14) << 48;
+        if constexpr (MaxKeyLen >= 16) v |= safe_byte_(p, len, 15) << 56;
+        return v;
+    }
+
     // Compare key bytes against the stored key at a slot.
     // Three strategies, selected at compile time:
     //
@@ -280,13 +301,10 @@ struct perfect_hash_set {
                 // Slightly more instructions than overlap, but zero branch misses
                 // since safe_byte_ uses conditional arithmetic (no branches).
                 return pack_input_(p, len) == packed_keys_[slot];
-            } else {
+            } else if constexpr (MaxKeyLen <= 16) {
 #ifdef __clang__
-                // MaxKeyLen > 8: first 8 bytes as fast filter, then byte loop.
-                // Key insight: branch on struct-constant min_key_len_ (perfect
-                // prediction) instead of per-key len (data-dependent, mispredicts).
-                //   min_key_len >= 8: ALL keys have 8+ bytes → direct memcpy (1 insn)
-                //   min_key_len <  8: some keys are short → branchless safe_byte (0 BM)
+                // MaxKeyLen 9-16: two packed uint64 words, fully branchless.
+                // Avoids the byte loop that compilers convert to early-exit branches.
                 std::uint64_t input_val;
                 if consteval {
                     input_val = pack_input_(p, len);
@@ -297,8 +315,26 @@ struct perfect_hash_set {
                         input_val = pack_input_(p, len);
                     }
                 }
-                // Branchless: XOR first 8 bytes into diff, then accumulate
-                // remaining bytes. Single check at the end — no intermediate branch.
+                std::uint64_t input_val2 = pack_input_upper_(p, len);
+                std::uint64_t diff = (input_val ^ packed_keys_[slot])
+                                   | (input_val2 ^ packed_keys2_[slot]);
+                return diff == 0;
+#else
+                return std::equal(p, p + len, slot_key_data_[slot].data());
+#endif
+            } else {
+#ifdef __clang__
+                // MaxKeyLen > 16: first 8 bytes packed, then byte loop.
+                std::uint64_t input_val;
+                if consteval {
+                    input_val = pack_input_(p, len);
+                } else {
+                    if (min_key_len_ >= 8) {
+                        __builtin_memcpy(&input_val, p, 8);
+                    } else {
+                        input_val = pack_input_(p, len);
+                    }
+                }
                 const char* a = slot_key_data_[slot].data();
                 std::uint64_t diff = input_val ^ packed_keys_[slot];
                 for (std::size_t i = 8; i < MaxKeyLen; ++i) {
@@ -323,8 +359,8 @@ struct perfect_hash_set {
         // Out-of-range lengths will fail the len_ok check below.
         auto clamped_len = len <= MaxKeyLen ? len : MaxKeyLen;
         std::size_t slot = compute_hash(key);
-        bool len_ok = (slot_key_len_[slot] == static_cast<std::uint8_t>(len));
-        bool key_ok = len == 0 || compare_key_(key.data(), clamped_len, slot);
+        bool len_ok = (slot_key_len_[slot] == len);
+        bool key_ok = compare_key_(key.data(), clamped_len, slot);
         return len_ok & key_ok;
     }
 
@@ -360,10 +396,10 @@ struct perfect_hash_set {
         auto len = key.size();
         auto clamped_len = len <= MaxKeyLen ? len : MaxKeyLen;
         std::size_t slot = compute_hash(key);
-        bool len_ok = (slot_key_len_[slot] == static_cast<std::uint8_t>(len));
-        bool key_ok = len == 0 || compare_key_(key.data(), clamped_len, slot);
-        if (!(len_ok & key_ok)) return std::nullopt;
-        return static_cast<std::size_t>(slot_to_key_[slot]);
+        bool len_ok = (slot_key_len_[slot] == len);
+        bool key_ok = compare_key_(key.data(), clamped_len, slot);
+        volatile auto is_ok = len_ok & key_ok; // prevent compiler optimizing away the check before slot_to_key_ access
+        return is_ok ? std::optional<std::size_t>{slot_to_key_[slot]} : std::nullopt;
     }
 };
 
