@@ -152,7 +152,8 @@ void bench_workload(const std::string &label,
                     const FrozenMap &frozen_map,
                     const KronuzPHF &kronuz_phf,
                     GperfFn gperf_fn,
-                    const BenchFilter &filter) {
+                    const BenchFilter &filter,
+                    bool describe) {
   std::vector<int> results(num_strings, 0);
   std::mt19937_64 gen(42);
   auto shuffle = [&]() {
@@ -171,6 +172,9 @@ void bench_workload(const std::string &label,
     pretty_print(label + " make_perfect_map (" + std::string(phf_map.algorithm_name()) + ")", num_strings,
                  shuffle_bench(phf_fn, shuffle));
     volatile auto sum = std::accumulate(results.begin(), results.end(), 0); // prevent optimization
+    if (describe) {
+      std::println("  {}", phf_map.algorithm_description());
+    }
   }
 
   // naive if/else
@@ -294,6 +298,7 @@ void run_keyset(const std::string &name,
                 const std::vector<std::string_view> &hit_keys,
                 const std::vector<std::string_view> &miss_keys,
                 const BenchFilter &filter,
+                bool describe,
                 size_t num_strings = 200000) {
 
   // Compute MaxKeyLen for display
@@ -319,15 +324,15 @@ void run_keyset(const std::string &name,
 
   if (filter.run_workload("hits")) {
     std::println("  --- all hits ---");
-    bench_workload("hits  ", hits, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, gperf_fn, filter);
+    bench_workload("hits  ", hits, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, gperf_fn, filter, describe);
   }
   if (filter.run_workload("misses")) {
     std::println("  --- all misses ---");
-    bench_workload("misses", misses, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, gperf_fn, filter);
+    bench_workload("misses", misses, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, gperf_fn, filter, describe);
   }
   if (filter.run_workload("mixed")) {
     std::println("  --- mixed (50/50) ---");
-    bench_workload("mixed ", mixed, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, gperf_fn, filter);
+    bench_workload("mixed ", mixed, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, gperf_fn, filter, describe);
   }
 }
 
@@ -756,6 +761,7 @@ int main(int argc, char *argv[]) {
 
   BenchFilter filter;
   bool verify = false;
+  bool describe = false;
   for (int i = 1; i < argc; i++) {
     std::string arg = argv[i];
     if (arg == "--help" || arg == "-h") {
@@ -763,6 +769,7 @@ int main(int argc, char *argv[]) {
       std::println("Options:");
       std::println("  --filter <tokens>  Comma-separated list of filter tokens");
       std::println("  --verify, -V       Verify all maps return correct results");
+      std::println("  --describe, -D     Print algorithm descriptions");
       std::println("  --help, -h         Show this help message\n");
       std::println("Filter tokens (mix and match):");
       std::println("  Workloads: hits, misses, mixed");
@@ -777,6 +784,9 @@ int main(int argc, char *argv[]) {
     }
     if (arg == "--verify" || arg == "-V") {
       verify = true;
+    }
+    if (arg == "--describe" || arg == "-D") {
+      describe = true;
     }
     if (arg == "--filter" && i + 1 < argc) {
       filter = parse_filter(argv[++i]);
@@ -853,7 +863,7 @@ int main(int argc, char *argv[]) {
     run_keyset("URL Protocols", protocol_phf, protocol_naive, protocol_frozen, protocol_kronuz, gperf_protocol,
       {"http","https","ftp","ws","wss","file"},
       {"ssh","telnet","mailto","data","blob","urn"},
-      filter);
+      filter, describe);
   }
 
   // --- S&P 100 Stock Tickers (100 keys, short) ---
@@ -871,7 +881,7 @@ int main(int argc, char *argv[]) {
        "TSLA","TXN","UNH","UNP","UPS","USB","V","VZ","WFC","WMT"},
       {"RIVN","PLTR","SNAP","UBER","LYFT","COIN","HOOD","DKNG","SOFI","RBLX",
        "ROKU","ZM","ABNB","DASH","CRWD","NET","SNOW","DDOG","MDB","PATH"},
-      filter);
+      filter, describe);
   }
 
   // --- C++ Keywords (15 keys, short-medium) ---
@@ -881,7 +891,7 @@ int main(int argc, char *argv[]) {
        "do","double","else","enum","float","for","goto","if"},
       {"int","void","return","while","switch","struct","static",
        "extern","inline","virtual","public","private","throw","try","catch"},
-      filter);
+      filter, describe);
   }
 
   // --- HTTP Headers (20 keys, long) ---
@@ -894,7 +904,7 @@ int main(int argc, char *argv[]) {
       {"X-Request-Id","Forwarded","Alt-Svc","DNT","Upgrade-Insecure-Requests",
        "X-Frame-Options","Content-Security-Policy","Strict-Transport-Security",
        "Pragma","Warning"},
-      filter);
+      filter, describe);
   }
 
   // --- MIME Types (15 keys, long) ---
@@ -907,6 +917,6 @@ int main(int argc, char *argv[]) {
       {"text/xml","text/csv","application/gzip","application/wasm",
        "image/avif","image/tiff","audio/ogg","video/webm",
        "font/otf","application/x-www-form-urlencoded"},
-      filter);
+      filter, describe);
   }
 }

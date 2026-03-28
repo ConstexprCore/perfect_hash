@@ -42,7 +42,7 @@ struct perfect_hash_set {
                   "MAX_POSITIONS must be < 0xFF to avoid collision with HD_MODE sentinel");
 
     // --- hot data (accessed every lookup) ---
-    std::array<std::uint8_t, 256> asso_values_{};
+    std::array<std::array<std::uint8_t, 256>, detail::MAX_POSITIONS> asso_values_{};
     std::uint8_t num_positions_{};
     std::array<std::uint8_t, detail::MAX_POSITIONS> positions_{};
     std::uint8_t min_key_len_{};
@@ -117,14 +117,15 @@ struct perfect_hash_set {
                 throw "Key length exceeds MaxKeyLen";
         }
 
-        std::array<std::size_t, 256> full_asso{};
+        std::array<std::array<std::size_t, 256>, detail::MAX_POSITIONS> full_asso{};
         std::size_t wide_num_positions{};
         std::array<std::size_t, detail::MAX_POSITIONS> wide_positions{};
         std::array<std::size_t, TableSize> wide_slot_to_key{};
         detail::generate_gperf<N, TableSize>(keys, full_asso, wide_num_positions, wide_positions, wide_slot_to_key);
 
-        for (std::size_t i = 0; i < 256; ++i)
-            asso_values_[i] = static_cast<std::uint8_t>(full_asso[i] % TableSize);
+        for (std::size_t pi = 0; pi < wide_num_positions; ++pi)
+            for (std::size_t i = 0; i < 256; ++i)
+                asso_values_[pi][i] = static_cast<std::uint8_t>(full_asso[pi][i] % TableSize);
         num_positions_ = static_cast<std::uint8_t>(wide_num_positions);
         for (std::size_t i = 0; i < wide_num_positions; ++i)
             positions_[i] = (wide_positions[i] == detail::LAST_CHAR)
@@ -155,11 +156,14 @@ struct perfect_hash_set {
         // For gperf mode: reduce asso_values mod TableSize (values can be large from bumping).
         // For H&D mode (num_positions == 0xFF): store raw displacement values (already < 255).
         if (data.num_positions == 0xFF) {
+            // H&D mode: only one displacement table in asso_values[0]
             for (std::size_t i = 0; i < 256; ++i)
-                asso_values_[i] = static_cast<std::uint8_t>(data.asso_values[i]);
+                asso_values_[0][i] = static_cast<std::uint8_t>(data.asso_values[0][i]);
         } else {
-            for (std::size_t i = 0; i < 256; ++i)
-                asso_values_[i] = static_cast<std::uint8_t>(data.asso_values[i] % TableSize);
+            // gperf mode: per-position asso tables
+            for (std::size_t pi = 0; pi < data.num_positions; ++pi)
+                for (std::size_t i = 0; i < 256; ++i)
+                    asso_values_[pi][i] = static_cast<std::uint8_t>(data.asso_values[pi][i] % TableSize);
         }
         num_positions_ = static_cast<std::uint8_t>(data.num_positions);
         // Copy positions. For H&D mode (num_positions == 0xFF), only copy
@@ -189,7 +193,24 @@ struct perfect_hash_set {
     [[nodiscard]] constexpr std::string_view algorithm_name() const noexcept {
         return num_positions_ == HD_MODE ? std::string_view("H&D") : std::string_view("gperf");
     }
-
+    [[nodiscard]] constexpr std::string algorithm_description() const noexcept {
+        if (num_positions_ == HD_MODE) {
+            return "Hash-and-Displace: bucket = (key[0] + key[last] + len) & 0xFF; slot = (asso_values[0][bucket] + hd_key_hash(key)) % " + std::to_string(table_size());
+        } else {
+            std::string desc = "gperf: h = len";
+            for (std::uint8_t i = 0; i < num_positions_; ++i) {
+                desc += " + asso_values[" + std::to_string(i) + "][key[";
+                if (positions_[i] == POS_LAST_CHAR) {
+                    desc += "last";
+                } else {
+                    desc += std::to_string(positions_[i]);
+                }
+                desc += "]]";
+            }
+            desc += " % " + std::to_string(table_size());
+            return desc;
+        }
+    }
     [[nodiscard]] constexpr std::string_view key_at(std::size_t i) const noexcept {
         std::uint8_t slot = key_to_slot_[i];
         return std::string_view(slot_key_data_[slot].data(), slot_key_len_[slot]);
@@ -306,7 +327,7 @@ struct perfect_hash_set {
     [[nodiscard]] constexpr constexprcore_really_inline std::size_t compute_hash(std::string_view key) const noexcept {
         if (num_positions_ == HD_MODE) {
             // H&D mode: uses shared hd_bucket_hash + hd_key_hash from generator.
-            std::size_t h = asso_values_[detail::hd_bucket_hash(key)] + detail::hd_key_hash(key);
+            std::size_t h = asso_values_[0][detail::hd_bucket_hash(key)] + detail::hd_key_hash(key);
             if constexpr (TABLE_SIZE_IS_POW2)
                 return h & (TableSize - 1);
             else
@@ -322,7 +343,7 @@ struct perfect_hash_set {
             } else {
                 ch = (pos < key.size()) ? static_cast<unsigned char>(key[pos]) : 256;
             }
-            if (ch < 256) h += asso_values_[ch];
+            if (ch < 256) h += asso_values_[i][ch];
         }
         if constexpr (TABLE_SIZE_IS_POW2)
             return h & (TableSize - 1);
@@ -370,6 +391,10 @@ struct perfect_hash_map {
 
     [[nodiscard]] constexpr std::string_view algorithm_name() const noexcept {
         return set_.algorithm_name();
+    }
+
+    [[nodiscard]] constexpr std::string algorithm_description() const noexcept {
+        return set_.algorithm_description();
     }
 
     [[nodiscard]] constexpr constexprcore_really_inline bool contains(std::string_view key) const noexcept {

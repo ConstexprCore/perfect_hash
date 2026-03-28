@@ -312,7 +312,7 @@ consteval std::size_t select_positions(
 template <std::size_t N, std::size_t M = N>
 consteval bool try_generate_gperf(
     const std::array<std::string_view, N>& keys,
-    std::array<std::size_t, 256>& asso_values,
+    std::array<std::array<std::size_t, 256>, MAX_POSITIONS>& asso_values,
     std::size_t& num_positions,
     std::array<std::size_t, MAX_POSITIONS>& positions,
     std::array<std::size_t, M>& slot_to_key)
@@ -327,24 +327,20 @@ consteval bool try_generate_gperf(
             std::size_t pos = positions[i];
             std::size_t ch = char_at(key, pos);
             if (ch < 256) {
-                h += asso_values[ch];
+                h += asso_values[i][ch];
             }
         }
         return h % M;
     };
 
-    // Pre-compute character frequencies ONCE (not per-collision).
-    // This was previously O(N * positions) per collision — a major bottleneck.
-    std::array<std::size_t, 256> char_freq{};
+    // Pre-compute character frequencies per position ONCE (not per-collision).
+    std::array<std::array<std::size_t, 256>, MAX_POSITIONS> char_freq{};
     for (std::size_t k = 0; k < N; ++k) {
         for (std::size_t p = 0; p < num_positions; ++p) {
             std::size_t ch = char_at(keys[k], positions[p]);
-            if (ch < 256) { ++char_freq[ch]; }
+            if (ch < 256) { ++char_freq[p][ch]; }
         }
     }
-    auto char_frequency = [&](std::size_t ch) -> std::size_t {
-        return (ch < 256) ? char_freq[ch] : 0;
-    };
 
     std::size_t jump_values[12];
     std::size_t num_jumps = 0;
@@ -372,7 +368,8 @@ consteval bool try_generate_gperf(
 
     for (std::size_t ji = 0; ji < num_jumps; ++ji) {
         std::size_t jump = jump_values[ji];
-        for (std::size_t i = 0; i < 256; ++i) asso_values[i] = 0;
+        for (std::size_t pi = 0; pi < num_positions; ++pi)
+            for (std::size_t i = 0; i < 256; ++i) asso_values[pi][i] = 0;
 
         bool solved = false;
         for (std::size_t iter = 0; iter < max_iterations; ++iter) {
@@ -398,18 +395,18 @@ consteval bool try_generate_gperf(
                 break;
             }
 
-            std::size_t diff_pos = LAST_CHAR;
+            std::size_t diff_pi = 0;
             for (std::size_t p = 0; p < num_positions; ++p) {
                 std::size_t ca = char_at(keys[col_a], positions[p]);
                 std::size_t cb = char_at(keys[col_b], positions[p]);
                 if (ca != cb && (ca < 256 || cb < 256)) {
-                    diff_pos = positions[p];
+                    diff_pi = p;
                     break;
                 }
             }
 
-            std::size_t ch_a = char_at(keys[col_a], diff_pos);
-            std::size_t ch_b = char_at(keys[col_b], diff_pos);
+            std::size_t ch_a = char_at(keys[col_a], positions[diff_pi]);
+            std::size_t ch_b = char_at(keys[col_b], positions[diff_pi]);
 
             std::size_t bump_char;
             if (ch_a >= 256) {
@@ -417,11 +414,11 @@ consteval bool try_generate_gperf(
             } else if (ch_b >= 256) {
                 bump_char = ch_a;
             } else {
-                bump_char = (char_frequency(ch_a) <= char_frequency(ch_b)) ? ch_a : ch_b;
+                bump_char = (char_freq[diff_pi][ch_a] <= char_freq[diff_pi][ch_b]) ? ch_a : ch_b;
             }
 
             if (bump_char < 256) {
-                asso_values[bump_char] += jump;
+                asso_values[diff_pi][bump_char] += jump;
             }
         }
 
@@ -449,7 +446,7 @@ consteval bool try_generate_gperf(
 template <std::size_t N, std::size_t M = N>
 consteval void generate_gperf(
     const std::array<std::string_view, N>& keys,
-    std::array<std::size_t, 256>& asso_values,
+    std::array<std::array<std::size_t, 256>, MAX_POSITIONS>& asso_values,
     std::size_t& num_positions,
     std::array<std::size_t, MAX_POSITIONS>& positions,
     std::array<std::size_t, M>& slot_to_key)
@@ -468,7 +465,7 @@ struct phf_result {
     // to solve (fewer collisions) which dramatically reduces consteval time.
     static constexpr std::size_t MAX_TABLE_SIZE = next_power_of_2(N) * 8;
     std::size_t table_size{};
-    std::array<std::size_t, 256> asso_values{};
+    std::array<std::array<std::size_t, 256>, MAX_POSITIONS> asso_values{};
     std::size_t num_positions{};
     std::array<std::size_t, MAX_POSITIONS> positions{};
     std::array<std::size_t, MAX_TABLE_SIZE> slot_to_key{};
@@ -482,7 +479,7 @@ consteval bool try_compute_phf(
 {
     static_assert(M <= phf_result<N>::MAX_TABLE_SIZE, "Table size M exceeds maximum");
 
-    std::array<std::size_t, 256> asso{};
+    std::array<std::array<std::size_t, 256>, MAX_POSITIONS> asso{};
     std::size_t npos{};
     std::array<std::size_t, MAX_POSITIONS> pos{};
     std::array<std::size_t, M> s2k{};
@@ -572,7 +569,7 @@ constexpr std::size_t hd_key_hash(std::string_view key) {
 template <std::size_t N, std::size_t M>
 consteval bool try_hash_and_displace(
     const std::array<std::string_view, N>& keys,
-    std::array<std::size_t, 256>& asso_values,
+    std::array<std::array<std::size_t, 256>, MAX_POSITIONS>& asso_values,
     std::size_t& num_positions,
     std::array<std::size_t, MAX_POSITIONS>& positions,
     std::array<std::size_t, M>& slot_to_key)
@@ -585,7 +582,7 @@ consteval bool try_hash_and_displace(
     // If num_positions == 0 (lengths alone distinguish), use a simpler path.
     if (num_positions == 0) {
         // Lengths alone distinguish — just assign slots by length % M
-        for (std::size_t i = 0; i < 256; ++i) asso_values[i] = 0;
+        for (std::size_t i = 0; i < 256; ++i) asso_values[0][i] = 0;
         for (std::size_t i = 0; i < M; ++i) slot_to_key[i] = N;
         for (std::size_t i = 0; i < N; ++i) {
             std::size_t slot = keys[i].size() % M;
@@ -598,7 +595,7 @@ consteval bool try_hash_and_displace(
     // Bucket hash: combine first char + last char + length into a byte index.
     // Each unique bucket gets a displacement value stored in asso_values[bucket].
     // Signal H&D mode to compute_hash via num_positions = 0xFF sentinel.
-    for (std::size_t i = 0; i < 256; ++i) asso_values[i] = 0;
+    for (std::size_t i = 0; i < 256; ++i) asso_values[0][i] = 0;
 
     // Use position 0 (first char) and LAST_CHAR (last char) for the bucket hash.
     // These provide the best discrimination for typical key sets (identifiers,
@@ -644,7 +641,7 @@ consteval bool try_hash_and_displace(
 
     // Initialize slots
     for (std::size_t i = 0; i < M; ++i) slot_to_key[i] = N;
-    for (std::size_t i = 0; i < 256; ++i) asso_values[i] = 0;
+    for (std::size_t i = 0; i < 256; ++i) asso_values[0][i] = 0;
 
     // For each bucket (largest first), find a displacement value d such that
     // (base_hash[key] + d) % M lands all keys on empty slots.
@@ -682,7 +679,7 @@ consteval bool try_hash_and_displace(
             }
 
             if (ok) {
-                asso_values[ch] = d;
+                asso_values[0][ch] = d;
                 for (std::size_t k = 0; k < bk_count; ++k) {
                     slot_to_key[bucket_slots[k]] = bucket_keys[k];
                 }
@@ -709,7 +706,7 @@ consteval bool try_compute_phf_hd(
 {
     static_assert(M <= phf_result<N>::MAX_TABLE_SIZE, "Table size M exceeds maximum");
 
-    std::array<std::size_t, 256> asso{};
+    std::array<std::array<std::size_t, 256>, MAX_POSITIONS> asso{};
     std::size_t npos{};
     std::array<std::size_t, MAX_POSITIONS> pos{};
     std::array<std::size_t, M> s2k{};
@@ -753,10 +750,9 @@ consteval phf_result<N> compute_phf_hd_po2(
 template <std::size_t N>
 consteval phf_result<N> compute_phf(const std::array<std::string_view, N>& keys) {
     constexpr std::size_t StartM = next_power_of_2(N);
-    // Threshold: gperf handles N<=15 in ~10s consteval; beyond that its
-    // O(N^2 * iterations) solver exceeds reasonable compile-time budgets.
-    // H&D is O(N) expected and compiles 100 keys in ~1.6 seconds.
-    if constexpr (N <= 15) {
+    // With per-position asso_values, gperf's collision resolver has much
+    // less collateral damage per bump, so it scales to larger key sets.
+    if constexpr (N <= 20) {
         return compute_phf_po2<N, StartM>(keys);
     } else {
         return compute_phf_hd_po2<N, StartM>(keys);
