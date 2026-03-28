@@ -242,12 +242,11 @@ struct perfect_hash_set {
                 // MaxKeyLen > 8: compare in uint64_t chunks.
                 // This allows the compiler to vectorize the comparison.
                 auto input_chunks = pack_input_chunks_(p, len);
+                bool match = true;
                 for (std::size_t chunk = 0; chunk < input_chunks.size(); ++chunk) {
-                    if (input_chunks[chunk] != packed_keys_[slot][chunk]) {
-                        return false;
-                    }
+                    match &= (input_chunks[chunk] == packed_keys_[slot][chunk]);
                 }
-                return true;
+                return match;
             }
         }
     }
