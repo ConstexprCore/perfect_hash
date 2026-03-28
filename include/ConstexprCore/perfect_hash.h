@@ -396,9 +396,9 @@ struct perfect_hash_set {
         auto len = key.size();
         auto clamped_len = len <= MaxKeyLen ? len : MaxKeyLen;
         std::size_t slot = compute_hash(key);
-        bool len_ok = (slot_key_len_[slot] == len);
+        bool len_ok = (slot_key_len_[slot] == len); // can cause branch mispredictions when there are misses.
         bool key_ok = compare_key_(key.data(), clamped_len, slot);
-        volatile auto is_ok = len_ok & key_ok; // prevent compiler optimizing away the check before slot_to_key_ access
+        auto is_ok = len_ok & key_ok;
         return is_ok ? std::optional<std::size_t>{slot_to_key_[slot]} : std::nullopt;
     }
 };
