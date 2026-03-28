@@ -281,31 +281,7 @@ struct perfect_hash_set {
                 // since safe_byte_ uses conditional arithmetic (no branches).
                 return pack_input_(p, len) == packed_keys_[slot];
             } else {
-                // MaxKeyLen > 8: first 8 bytes as fast filter, then byte loop.
-                // Key insight: branch on struct-constant min_key_len_ (perfect
-                // prediction) instead of per-key len (data-dependent, mispredicts).
-                //   min_key_len >= 8: ALL keys have 8+ bytes → direct memcpy (1 insn)
-                //   min_key_len <  8: some keys are short → branchless safe_byte (0 BM)
-                std::uint64_t input_val;
-                if consteval {
-                    input_val = pack_input_(p, len);
-                } else {
-                    if (min_key_len_ >= 8) {
-                        __builtin_memcpy(&input_val, p, 8);
-                    } else {
-                        input_val = pack_input_(p, len);
-                    }
-                }
-                // Branchless: XOR first 8 bytes into diff, then accumulate
-                // remaining bytes. Single check at the end — no intermediate branch.
-                const char* a = slot_key_data_[slot].data();
-                std::uint64_t diff = input_val ^ packed_keys_[slot];
-                for (std::size_t i = 8; i < MaxKeyLen; ++i) {
-                    std::uint64_t a_byte = static_cast<unsigned char>(a[i]);
-                    std::uint64_t p_byte = safe_byte_(p, len, i);
-                    diff |= (a_byte ^ p_byte);
-                }
-                return diff == 0;
+                return std::equal(p, p + len, slot_key_data_[slot].data());
             }
         }
     }
