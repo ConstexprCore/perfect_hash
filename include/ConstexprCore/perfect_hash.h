@@ -48,7 +48,7 @@ struct perfect_hash_set {
     std::uint8_t min_key_len_{};
     std::array<std::uint8_t, TableSize> slot_key_len_{};                    // key length (0xFF = empty)
     std::array<std::array<char, MaxKeyLen>, TableSize> slot_key_data_{};    // inline key bytes
-    std::array<std::uint64_t, TableSize> packed_keys_{};                    // first 8 bytes packed for branchless cmp
+    std::array<std::array<std::uint64_t, (MaxKeyLen+7)/8>, TableSize> packed_keys_{};  // key bytes packed in uint64_t chunks
 
     // --- cold data (rarely accessed) ---
     std::array<std::uint8_t, TableSize> slot_to_key_{};     // hash_slot -> declaration-order index
@@ -79,32 +79,16 @@ struct perfect_hash_set {
         for (std::size_t s = 0; s < TableSize; ++s) {
             if (slot_to_key_[s] < N) {
                 auto k = keys[slot_to_key_[s]];
-                if constexpr (MaxKeyLen <= 4) {
-                    // Overlap encoding: lo16 | hi16<<16 | len<<32.
-                    // For MaxKeyLen <= 4, overlap covers all bytes.
-                    if (k.size() >= 2) {
-                        std::uint64_t lo = static_cast<unsigned char>(k[0])
-                            | (static_cast<std::uint64_t>(static_cast<unsigned char>(k[1])) << 8);
-                        std::uint64_t hi = static_cast<unsigned char>(k[k.size()-2])
-                            | (static_cast<std::uint64_t>(static_cast<unsigned char>(k[k.size()-1])) << 8);
-                        packed_keys_[s] = lo | (hi << 16) | (static_cast<std::uint64_t>(k.size()) << 32);
-                    } else if (k.size() == 1) {
-                        packed_keys_[s] = static_cast<unsigned char>(k[0])
-                            | (static_cast<std::uint64_t>(1) << 32);
+                // Pack key bytes into uint64_t chunks
+                for (std::size_t chunk = 0; chunk < (MaxKeyLen + 7) / 8; ++chunk) {
+                    std::uint64_t p = 0;
+                    for (std::size_t byte = 0; byte < 8; ++byte) {
+                        std::size_t idx = chunk * 8 + byte;
+                        if (idx < k.size()) {
+                            p |= static_cast<std::uint64_t>(static_cast<unsigned char>(k[idx])) << (byte * 8);
+                        }
                     }
-                } else if constexpr (MaxKeyLen <= 8) {
-                    // Sequential packing: first up to 8 bytes, zero-padded.
-                    // Used with safe_byte pack_input_ comparison.
-                    std::uint64_t p = 0;
-                    for (std::size_t c = 0; c < k.size(); ++c)
-                        p |= static_cast<std::uint64_t>(static_cast<unsigned char>(k[c])) << (c * 8);
-                    packed_keys_[s] = p;
-                } else {
-                    // Sequential: first 8 bytes packed (fast filter for long keys).
-                    std::uint64_t p = 0;
-                    for (std::size_t c = 0; c < k.size() && c < 8; ++c)
-                        p |= static_cast<std::uint64_t>(static_cast<unsigned char>(k[c])) << (c * 8);
-                    packed_keys_[s] = p;
+                    packed_keys_[s][chunk] = p;
                 }
             }
         }
@@ -216,17 +200,31 @@ struct perfect_hash_set {
         return v;
     }
 
+    // Pack key bytes into uint64_t chunks, zero-padded. Branchless.
+    [[nodiscard]] static constexpr std::array<std::uint64_t, (MaxKeyLen+7)/8> pack_input_chunks_(
+        const char* p, std::size_t len) noexcept {
+        std::array<std::uint64_t, (MaxKeyLen+7)/8> chunks{};
+        for (std::size_t chunk = 0; chunk < chunks.size(); ++chunk) {
+            std::uint64_t v = 0;
+            for (std::size_t byte = 0; byte < 8; ++byte) {
+                std::size_t idx = chunk * 8 + byte;
+                if (idx < MaxKeyLen) {
+                    v |= safe_byte_(p, len, idx) << (byte * 8);
+                }
+            }
+            chunks[chunk] = v;
+        }
+        return chunks;
+    }
+
     // Compare key bytes against the stored key at a slot.
-    // Three strategies, selected at compile time:
+    // Two strategies, selected at compile time:
     //
-    // 1. Overlap LDRH (fastest, 2 loads): for MaxKeyLen <= 8 and min_key_len >= 2.
-    //    Two in-bounds halfword loads p[0..1] and p[len-2..len-1] combined with
-    //    length into a single uint64 comparison. 22 insn on ARM64, 0 BM.
-    //
-    // 2. Branchless safe_byte pack: for MaxKeyLen <= 8 when overlap isn't safe.
+    // 1. Branchless safe_byte pack: for MaxKeyLen <= 8.
     //    Packs up to 8 bytes branchlessly into uint64 using conditional indexing.
     //
-    // 3. Byte-by-byte loop: for MaxKeyLen > 8 or consteval context.
+    // 2. Chunked comparison: for MaxKeyLen > 8.
+    //    Compares key bytes in uint64_t chunks for better vectorization.
     [[nodiscard]] constexpr constexprcore_really_inline bool compare_key_(
         const char* p, std::size_t len, std::size_t slot) const noexcept {
         if consteval {
@@ -236,51 +234,20 @@ struct perfect_hash_set {
                 if (a[i] != p[i]) return false;
             return true;
         } else {
-            if constexpr (MaxKeyLen <= 4) {
-                // Overlap comparison: for MaxKeyLen <= 4, overlap covers all bytes.
-                std::uint64_t encoded;
-                if (len >= 2) {
-                    std::uint16_t lo, hi;
-                    __builtin_memcpy(&lo, p, 2);
-                    __builtin_memcpy(&hi, p + len - 2, 2);
-                    encoded = lo | (static_cast<std::uint64_t>(hi) << 16)
-                        | (static_cast<std::uint64_t>(len) << 32);
-                } else {
-                    encoded = static_cast<unsigned char>(p[0])
-                        | (static_cast<std::uint64_t>(len) << 32);
-                }
-                return encoded == packed_keys_[slot];
-            } else if constexpr (MaxKeyLen <= 8) {
+            if constexpr (MaxKeyLen <= 8) {
                 // Branchless safe_byte pack: packs all key bytes into uint64.
-                // Slightly more instructions than overlap, but zero branch misses
-                // since safe_byte_ uses conditional arithmetic (no branches).
-                return pack_input_(p, len) == packed_keys_[slot];
+                // Zero branch misses since safe_byte_ uses conditional arithmetic.
+                return pack_input_(p, len) == packed_keys_[slot][0];
             } else {
-                // MaxKeyLen > 8: first 8 bytes as fast filter, then byte loop.
-                // Key insight: branch on struct-constant min_key_len_ (perfect
-                // prediction) instead of per-key len (data-dependent, mispredicts).
-                //   min_key_len >= 8: ALL keys have 8+ bytes → direct memcpy (1 insn)
-                //   min_key_len <  8: some keys are short → branchless safe_byte (0 BM)
-                std::uint64_t input_val;
-                if consteval {
-                    input_val = pack_input_(p, len);
-                } else {
-                    if (min_key_len_ >= 8) {
-                        __builtin_memcpy(&input_val, p, 8);
-                    } else {
-                        input_val = pack_input_(p, len);
+                // MaxKeyLen > 8: compare in uint64_t chunks.
+                // This allows the compiler to vectorize the comparison.
+                auto input_chunks = pack_input_chunks_(p, len);
+                for (std::size_t chunk = 0; chunk < input_chunks.size(); ++chunk) {
+                    if (input_chunks[chunk] != packed_keys_[slot][chunk]) {
+                        return false;
                     }
                 }
-                // Branchless: XOR first 8 bytes into diff, then accumulate
-                // remaining bytes. Single check at the end — no intermediate branch.
-                const char* a = slot_key_data_[slot].data();
-                std::uint64_t diff = input_val ^ packed_keys_[slot];
-                for (std::size_t i = 8; i < MaxKeyLen; ++i) {
-                    std::uint64_t a_byte = static_cast<unsigned char>(a[i]);
-                    std::uint64_t p_byte = safe_byte_(p, len, i);
-                    diff |= (a_byte ^ p_byte);
-                }
-                return diff == 0;
+                return true;
             }
         }
     }
