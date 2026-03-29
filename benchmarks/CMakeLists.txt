@@ -61,6 +61,13 @@ target_link_libraries(bench_protocol PRIVATE
     frozen::frozen
 )
 
+add_executable(simd_experiments ../perf_viz/simd_experiments.cpp)
+target_link_libraries(simd_experiments PRIVATE
+    ConstexprCore::perfect_hash counters::counters)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(simd_experiments PRIVATE -fconstexpr-steps=2147483647)
+endif()
+
 add_executable(phf_bench bench_lookup.cpp)
 target_link_libraries(phf_bench PRIVATE
     ConstexprCore::perfect_hash
