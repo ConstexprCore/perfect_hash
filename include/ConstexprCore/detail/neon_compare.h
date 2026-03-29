@@ -1,10 +1,21 @@
 #ifndef CONSTEXPRCORE_DETAIL_NEON_COMPARE_H
 #define CONSTEXPRCORE_DETAIL_NEON_COMPARE_H
 
+
+#ifndef constexprcore_really_inline
+#if defined(_MSC_VER) && !defined(__clang__)
+#define constexprcore_really_inline __forceinline
+#else
+#define constexprcore_really_inline inline __attribute__((always_inline))
+#endif // defined(_MSC_VER) && !defined(__clang__)
+#endif // constexprcore_really_inline
+
 #if defined(__aarch64__) && !defined(CONSTEXPRCORE_NO_NEON)
 #include <arm_neon.h>
 #include <cstdint>
 #include <cstddef>
+#define CONSTEXPRCORE_HAS_NEON 1
+
 
 namespace ConstexprCore::detail {
 
@@ -12,8 +23,7 @@ namespace ConstexprCore::detail {
 // Replaces ~48 instructions of safe_byte packing with ~5 NEON instructions.
 // p: input key data, len: key length (1-16), stored: slot_key_data (16+ bytes, zero-padded).
 // Returns true if the first 'len' bytes of p match the first 'len' bytes of stored.
-inline __attribute__((always_inline))
-bool neon_compare_16(const char* p, std::size_t len, const char* stored) noexcept {
+constexprcore_really_inline bool neon_compare_16(const char* p, std::size_t len, const char* stored) noexcept {
     // Precomputed TBL index vectors: bytes at index >= len are set to 0x80,
     // which TBL maps to 0, effectively zero-padding the input.
     static constexpr std::uint8_t masks[17][16] = {
@@ -57,9 +67,9 @@ bool neon_compare_16(const char* p, std::size_t len, const char* stored) noexcep
     uint8x16_t stored_vec = vld1q_u8(reinterpret_cast<const uint8_t*>(stored));
     uint8x16_t cmp = vceqq_u8(input, stored_vec);
 
-    // Reduce: AND high and low halves, check all 0xFF
-    uint8x8_t and_halves = vand_u8(vget_low_u8(cmp), vget_high_u8(cmp));
-    return vget_lane_u64(vreinterpret_u64_u8(and_halves), 0) == ~0ULL;
+    // Reduce: narrowing shift pairs adjacent bytes into one, 0xFF only if both were 0xFF
+    uint8x8_t narrowed = vshrn_n_u16(vreinterpretq_u16_u8(cmp), 4);
+    return vget_lane_u64(vreinterpret_u64_u8(narrowed), 0) == ~0ULL;
 }
 
 } // namespace ConstexprCore::detail

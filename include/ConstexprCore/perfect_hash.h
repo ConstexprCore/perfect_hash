@@ -10,9 +10,6 @@
 #include <tuple>
 #include <cstddef>
 #include <cstdint>
-// NEON comparison helper (arm64 only, separate header to avoid polluting consteval)
-#include <ConstexprCore/detail/neon_compare.h>
-
 #ifndef constexprcore_really_inline
 #if defined(_MSC_VER) && !defined(__clang__)
 #define constexprcore_really_inline __forceinline
@@ -20,6 +17,10 @@
 #define constexprcore_really_inline inline __attribute__((always_inline))
 #endif
 #endif
+// NEON comparison helper (arm64 only, separate header to avoid polluting consteval)
+#include <ConstexprCore/detail/neon_compare.h>
+
+
 
 namespace ConstexprCore {
 
@@ -49,7 +50,11 @@ struct perfect_hash_set {
     std::array<std::uint8_t, detail::MAX_POSITIONS> positions_{};
     std::uint8_t min_key_len_{};
     std::array<std::uint8_t, TableSize> slot_key_len_{};                    // key length (0xFF = empty)
+#if CONSTEXPRCORE_HAS_NEON
+    std::array<std::array<char, (MaxKeyLen + 15)/16 * 16>, TableSize> slot_key_data_{};    // inline key bytes
+#else
     std::array<std::array<char, MaxKeyLen>, TableSize> slot_key_data_{};    // inline key bytes
+#endif
     std::array<std::uint64_t, TableSize> packed_keys_{};                    // first 8 bytes packed for branchless cmp
     std::array<std::uint64_t, TableSize> packed_keys2_{};                   // bytes 8-15 packed (MaxKeyLen > 8)
 
@@ -304,7 +309,7 @@ struct perfect_hash_set {
                 // since safe_byte_ uses conditional arithmetic (no branches).
                 return pack_input_(p, len) == packed_keys_[slot];
             } else if constexpr (MaxKeyLen <= 16) {
-#if defined(CONSTEXPRCORE_HAS_NEON) && defined(__clang__)
+#if CONSTEXPRCORE_HAS_NEON
                 // ARM64 NEON: page-safe 16-byte load + TBL masking + vceqq.
                 // Replaces ~48 insn of safe_byte packing with ~5 NEON insn.
                 return detail::neon_compare_16(p, len, slot_key_data_[slot].data());
