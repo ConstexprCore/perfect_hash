@@ -10,6 +10,8 @@
 #include <tuple>
 #include <cstddef>
 #include <cstdint>
+// NEON comparison helper (arm64 only, separate header to avoid polluting consteval)
+#include <ConstexprCore/detail/neon_compare.h>
 
 #ifndef constexprcore_really_inline
 #if defined(_MSC_VER) && !defined(__clang__)
@@ -302,9 +304,12 @@ struct perfect_hash_set {
                 // since safe_byte_ uses conditional arithmetic (no branches).
                 return pack_input_(p, len) == packed_keys_[slot];
             } else if constexpr (MaxKeyLen <= 16) {
-#ifdef __clang__
-                // MaxKeyLen 9-16: two packed uint64 words, fully branchless.
-                // Avoids the byte loop that compilers convert to early-exit branches.
+#if defined(CONSTEXPRCORE_HAS_NEON) && defined(__clang__)
+                // ARM64 NEON: page-safe 16-byte load + TBL masking + vceqq.
+                // Replaces ~48 insn of safe_byte packing with ~5 NEON insn.
+                return detail::neon_compare_16(p, len, slot_key_data_[slot].data());
+#elif defined(__clang__)
+                // Scalar fallback: two packed uint64 words, fully branchless.
                 std::uint64_t input_val;
                 if consteval {
                     input_val = pack_input_(p, len);
