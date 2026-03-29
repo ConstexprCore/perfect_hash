@@ -50,6 +50,7 @@ constexprcore_really_inline bool neon_compare_16(const char* p, std::size_t len,
     uint8x16_t raw;
     uintptr_t addr = reinterpret_cast<uintptr_t>(p);
     if (__builtin_expect((addr & 16383) <= 16368, 1)) {
+        // todo: this requires silencing sanitizers (clang/gcc).
         raw = vld1q_u8(reinterpret_cast<const uint8_t*>(p));
     } else {
         // Rare fallback: copy byte-by-byte
