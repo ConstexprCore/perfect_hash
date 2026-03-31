@@ -320,10 +320,15 @@ struct perfect_hash_set {
                 }
                 return encoded == packed_keys_[slot];
             } else if constexpr (MaxKeyLen <= 8) {
+#if CONSTEXPRCORE_HAS_NEON
+                // ARM64 NEON: page-safe 16-byte load + TBL masking + uint64 extract.
+                // Replaces ~24 insn of safe_byte packing with ~5 NEON insn.
+                return detail::neon_compare_8(p, len, packed_keys_[slot]);
+#else
                 // Branchless safe_byte pack: packs all key bytes into uint64.
-                // Slightly more instructions than overlap, but zero branch misses
-                // since safe_byte_ uses conditional arithmetic (no branches).
+                // Zero branch misses since safe_byte_ uses conditional arithmetic.
                 return pack_input_(p, len) == packed_keys_[slot];
+#endif
             } else if constexpr (MaxKeyLen <= 16) {
 #if CONSTEXPRCORE_HAS_NEON
                 // ARM64 NEON: page-safe 16-byte load + TBL masking + vceqq.
