@@ -62,6 +62,13 @@ struct perfect_hash_set {
     std::array<std::uint8_t, TableSize> slot_to_key_{};     // hash_slot -> declaration-order index
     std::array<std::uint8_t, N> key_to_slot_{};             // declaration-order index -> slot
 
+    // --- MaxKeyLen == 1 fast path: direct char -> key-index table ---
+    // When all keys are single characters, bypasses hash computation entirely.
+    // Indexed by the raw byte value; 0xFF = not a key.
+    struct no_direct_table_t {};
+    [[no_unique_address]] std::conditional_t<MaxKeyLen == 1,
+        std::array<std::uint8_t, 256>, no_direct_table_t> direct_lookup_{};
+
     // Shared init logic for both constructors.
     consteval void init_inline_data_(const std::array<std::string_view, N>& keys) {
         // Step 1: Compute min key length for fast rejection in contains().
@@ -83,7 +90,16 @@ struct perfect_hash_set {
             }
         }
 
-        // Step 3: Build packed_keys_ for fast key comparison.
+        // Step 3: Build direct lookup table for MaxKeyLen == 1.
+        if constexpr (MaxKeyLen == 1) {
+            for (std::size_t c = 0; c < 256; ++c)
+                direct_lookup_[c] = 0xFF;
+            for (std::size_t i = 0; i < N; ++i)
+                if (!keys[i].empty())
+                    direct_lookup_[static_cast<unsigned char>(keys[i][0])] = static_cast<std::uint8_t>(i);
+        }
+
+        // Step 4: Build packed_keys_ for fast key comparison.
         for (std::size_t s = 0; s < TableSize; ++s) {
             if (slot_to_key_[s] < N) {
                 auto k = keys[slot_to_key_[s]];
@@ -361,6 +377,13 @@ struct perfect_hash_set {
     }
 
     [[nodiscard]] constexpr constexprcore_really_inline bool contains(std::string_view key) const noexcept {
+        // MaxKeyLen == 1 fast path: direct byte-indexed lookup, no hash needed.
+        if constexpr (MaxKeyLen == 1) {
+            if (key.size() == 1)
+                return direct_lookup_[static_cast<unsigned char>(key[0])] != 0xFF;
+            if (key.size() > 1) return false;
+            // key.empty(): fall through to general path (handles sets containing "")
+        }
         // Reject empty keys early only when no empty key exists in the set.
         // min_key_len_ is a struct constant so this branch compiles away.
         if (min_key_len_ > 0 && key.empty()) return false;
@@ -402,11 +425,19 @@ struct perfect_hash_set {
     }
 
     [[nodiscard]] constexpr constexprcore_really_inline std::optional<std::size_t> index_of(std::string_view key) const noexcept {
+        if constexpr (MaxKeyLen == 1) {
+            if (key.size() == 1) {
+                auto idx = direct_lookup_[static_cast<unsigned char>(key[0])];
+                return idx != 0xFF ? std::optional<std::size_t>{idx} : std::nullopt;
+            }
+            if (key.size() > 1) return std::nullopt;
+            // key.empty(): fall through to general path
+        }
         if (min_key_len_ > 0 && key.empty()) return std::nullopt;
         auto len = key.size();
         auto clamped_len = len <= MaxKeyLen ? len : MaxKeyLen;
         std::size_t slot = compute_hash(key);
-        bool len_ok = (slot_key_len_[slot] == len); // can cause branch mispredictions when there are misses.
+        bool len_ok = (slot_key_len_[slot] == len);
         bool key_ok = compare_key_(key.data(), clamped_len, slot);
         auto is_ok = len_ok & key_ok;
         return is_ok ? std::optional<std::size_t>{slot_to_key_[slot]} : std::nullopt;
