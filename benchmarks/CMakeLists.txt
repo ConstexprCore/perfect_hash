@@ -1,13 +1,4 @@
 FetchContent_Declare(
-    benchmark
-    GIT_REPOSITORY https://github.com/google/benchmark.git
-    GIT_TAG v1.9.1
-)
-set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
-set(BENCHMARK_ENABLE_INSTALL OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(benchmark)
-
-FetchContent_Declare(
     counters
     GIT_REPOSITORY https://github.com/lemire/counters.git
     GIT_TAG v3.0.0
@@ -61,16 +52,16 @@ target_link_libraries(bench_protocol PRIVATE
     frozen::frozen
 )
 
-add_executable(phf_bench bench_lookup.cpp)
-target_link_libraries(phf_bench PRIVATE
-    ConstexprCore::perfect_hash
-    benchmark::benchmark_main
-)
+add_executable(simd_experiments ../perf_viz/simd_experiments.cpp)
+target_link_libraries(simd_experiments PRIVATE
+    ConstexprCore::perfect_hash counters::counters)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(simd_experiments PRIVATE -fconstexpr-steps=2147483647)
+endif()
 
 if(CMAKE_BUILD_TYPE STREQUAL "Debug")
     message(WARNING "Building benchmarks in debug mode may affect performance measurements.")
 endif()
 if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
-    target_compile_options(phf_bench PRIVATE -fconstexpr-steps=500000000)
     target_compile_options(bench_protocol PRIVATE -fconstexpr-steps=2147483647)
 endif()

@@ -59,7 +59,7 @@ BenchFilter parse_filter(const std::string &arg) {
   BenchFilter f;
   static const std::set<std::string> valid_workloads = {"hits", "misses", "mixed"};
   static const std::set<std::string> valid_methods = {"make_perfect_map", "naive", "unordered_map", "ankerl", "absl", "frozen", "kronuz", "gperf"};
-  static const std::set<std::string> valid_keysets = {"protocol", "stock", "keyword", "header", "mime"};
+  static const std::set<std::string> valid_keysets = {"protocol", "stock", "keyword", "header", "mime", "letters", "headers50"};
 
   size_t start = 0;
   while (start < arg.size()) {
@@ -92,6 +92,12 @@ namespace gperf_header {
 }
 namespace gperf_mime {
 #include "gperf/mime_gperf.inc"
+}
+namespace gperf_letters {
+#include "letters26_gperf.inc"
+}
+namespace gperf_headers50 {
+#include "http_headers50_gperf.inc"
 }
 
 // ============================================================================
@@ -658,6 +664,180 @@ std::optional<int> mime_naive(std::string_view s) {
 }
 
 // ============================================================================
+// Key set 6: Letters a-z (26 keys, MaxKeyLen=1) — uniform length stress test
+// ============================================================================
+
+static constexpr auto letters_phf =
+    ConstexprCore::make_perfect_map<
+        ConstexprCore::kv<"a", 0>,  ConstexprCore::kv<"b", 1>,
+        ConstexprCore::kv<"c", 2>,  ConstexprCore::kv<"d", 3>,
+        ConstexprCore::kv<"e", 4>,  ConstexprCore::kv<"f", 5>,
+        ConstexprCore::kv<"g", 6>,  ConstexprCore::kv<"h", 7>,
+        ConstexprCore::kv<"i", 8>,  ConstexprCore::kv<"j", 9>,
+        ConstexprCore::kv<"k", 10>, ConstexprCore::kv<"l", 11>,
+        ConstexprCore::kv<"m", 12>, ConstexprCore::kv<"n", 13>,
+        ConstexprCore::kv<"o", 14>, ConstexprCore::kv<"p", 15>,
+        ConstexprCore::kv<"q", 16>, ConstexprCore::kv<"r", 17>,
+        ConstexprCore::kv<"s", 18>, ConstexprCore::kv<"t", 19>,
+        ConstexprCore::kv<"u", 20>, ConstexprCore::kv<"v", 21>,
+        ConstexprCore::kv<"w", 22>, ConstexprCore::kv<"x", 23>,
+        ConstexprCore::kv<"y", 24>, ConstexprCore::kv<"z", 25>>();
+
+static constexpr frozen::unordered_map<frozen::string, int, 26> letters_frozen = {
+    {"a",0},{"b",1},{"c",2},{"d",3},{"e",4},{"f",5},{"g",6},{"h",7},
+    {"i",8},{"j",9},{"k",10},{"l",11},{"m",12},{"n",13},{"o",14},{"p",15},
+    {"q",16},{"r",17},{"s",18},{"t",19},{"u",20},{"v",21},{"w",22},{"x",23},
+    {"y",24},{"z",25}
+};
+
+static constexpr auto letters_kronuz = [] {
+  fnv1ah32 h{};
+  return phf::make_phf({
+    h("a"),h("b"),h("c"),h("d"),h("e"),h("f"),h("g"),h("h"),h("i"),h("j"),
+    h("k"),h("l"),h("m"),h("n"),h("o"),h("p"),h("q"),h("r"),h("s"),h("t"),
+    h("u"),h("v"),h("w"),h("x"),h("y"),h("z")
+  });
+}();
+
+std::optional<int> letters_naive(std::string_view s) {
+  if (s == "a") return 0;  if (s == "b") return 1;
+  if (s == "c") return 2;  if (s == "d") return 3;
+  if (s == "e") return 4;  if (s == "f") return 5;
+  if (s == "g") return 6;  if (s == "h") return 7;
+  if (s == "i") return 8;  if (s == "j") return 9;
+  if (s == "k") return 10; if (s == "l") return 11;
+  if (s == "m") return 12; if (s == "n") return 13;
+  if (s == "o") return 14; if (s == "p") return 15;
+  if (s == "q") return 16; if (s == "r") return 17;
+  if (s == "s") return 18; if (s == "t") return 19;
+  if (s == "u") return 20; if (s == "v") return 21;
+  if (s == "w") return 22; if (s == "x") return 23;
+  if (s == "y") return 24; if (s == "z") return 25;
+  return std::nullopt;
+}
+
+// ============================================================================
+// Key set 7: HTTP Headers 50 (50 keys, MaxKeyLen=19) — large realistic set
+// ============================================================================
+
+static constexpr auto headers50_phf =
+    ConstexprCore::make_perfect_map<
+        ConstexprCore::kv<"Accept", 0>,
+        ConstexprCore::kv<"Accept-Charset", 1>,
+        ConstexprCore::kv<"Accept-Encoding", 2>,
+        ConstexprCore::kv<"Accept-Language", 3>,
+        ConstexprCore::kv<"Accept-Ranges", 4>,
+        ConstexprCore::kv<"Age", 5>,
+        ConstexprCore::kv<"Allow", 6>,
+        ConstexprCore::kv<"Authorization", 7>,
+        ConstexprCore::kv<"Cache-Control", 8>,
+        ConstexprCore::kv<"Connection", 9>,
+        ConstexprCore::kv<"Content-Encoding", 10>,
+        ConstexprCore::kv<"Content-Language", 11>,
+        ConstexprCore::kv<"Content-Length", 12>,
+        ConstexprCore::kv<"Content-Location", 13>,
+        ConstexprCore::kv<"Content-Type", 14>,
+        ConstexprCore::kv<"Cookie", 15>,
+        ConstexprCore::kv<"Date", 16>,
+        ConstexprCore::kv<"ETag", 17>,
+        ConstexprCore::kv<"Expect", 18>,
+        ConstexprCore::kv<"Expires", 19>,
+        ConstexprCore::kv<"From", 20>,
+        ConstexprCore::kv<"Host", 21>,
+        ConstexprCore::kv<"If-Match", 22>,
+        ConstexprCore::kv<"If-Modified-Since", 23>,
+        ConstexprCore::kv<"If-None-Match", 24>,
+        ConstexprCore::kv<"If-Range", 25>,
+        ConstexprCore::kv<"If-Unmodified-Since", 26>,
+        ConstexprCore::kv<"Keep-Alive", 27>,
+        ConstexprCore::kv<"Last-Modified", 28>,
+        ConstexprCore::kv<"Location", 29>,
+        ConstexprCore::kv<"Max-Forwards", 30>,
+        ConstexprCore::kv<"Origin", 31>,
+        ConstexprCore::kv<"Pragma", 32>,
+        ConstexprCore::kv<"Proxy-Authenticate", 33>,
+        ConstexprCore::kv<"Proxy-Authorization", 34>,
+        ConstexprCore::kv<"Range", 35>,
+        ConstexprCore::kv<"Referer", 36>,
+        ConstexprCore::kv<"Retry-After", 37>,
+        ConstexprCore::kv<"Server", 38>,
+        ConstexprCore::kv<"Set-Cookie", 39>,
+        ConstexprCore::kv<"TE", 40>,
+        ConstexprCore::kv<"Trailer", 41>,
+        ConstexprCore::kv<"Transfer-Encoding", 42>,
+        ConstexprCore::kv<"Upgrade", 43>,
+        ConstexprCore::kv<"User-Agent", 44>,
+        ConstexprCore::kv<"Vary", 45>,
+        ConstexprCore::kv<"Via", 46>,
+        ConstexprCore::kv<"WWW-Authenticate", 47>,
+        ConstexprCore::kv<"Warning", 48>,
+        ConstexprCore::kv<"X-Forwarded-For", 49>>();
+
+static constexpr frozen::unordered_map<frozen::string, int, 50> headers50_frozen = {
+    {"Accept",0},{"Accept-Charset",1},{"Accept-Encoding",2},{"Accept-Language",3},
+    {"Accept-Ranges",4},{"Age",5},{"Allow",6},{"Authorization",7},
+    {"Cache-Control",8},{"Connection",9},{"Content-Encoding",10},{"Content-Language",11},
+    {"Content-Length",12},{"Content-Location",13},{"Content-Type",14},{"Cookie",15},
+    {"Date",16},{"ETag",17},{"Expect",18},{"Expires",19},
+    {"From",20},{"Host",21},{"If-Match",22},{"If-Modified-Since",23},
+    {"If-None-Match",24},{"If-Range",25},{"If-Unmodified-Since",26},{"Keep-Alive",27},
+    {"Last-Modified",28},{"Location",29},{"Max-Forwards",30},{"Origin",31},
+    {"Pragma",32},{"Proxy-Authenticate",33},{"Proxy-Authorization",34},{"Range",35},
+    {"Referer",36},{"Retry-After",37},{"Server",38},{"Set-Cookie",39},
+    {"TE",40},{"Trailer",41},{"Transfer-Encoding",42},{"Upgrade",43},
+    {"User-Agent",44},{"Vary",45},{"Via",46},{"WWW-Authenticate",47},
+    {"Warning",48},{"X-Forwarded-For",49}
+};
+
+static constexpr auto headers50_kronuz = [] {
+  fnv1ah32 h{};
+  return phf::make_phf({
+    h("Accept"),h("Accept-Charset"),h("Accept-Encoding"),h("Accept-Language"),
+    h("Accept-Ranges"),h("Age"),h("Allow"),h("Authorization"),
+    h("Cache-Control"),h("Connection"),h("Content-Encoding"),h("Content-Language"),
+    h("Content-Length"),h("Content-Location"),h("Content-Type"),h("Cookie"),
+    h("Date"),h("ETag"),h("Expect"),h("Expires"),
+    h("From"),h("Host"),h("If-Match"),h("If-Modified-Since"),
+    h("If-None-Match"),h("If-Range"),h("If-Unmodified-Since"),h("Keep-Alive"),
+    h("Last-Modified"),h("Location"),h("Max-Forwards"),h("Origin"),
+    h("Pragma"),h("Proxy-Authenticate"),h("Proxy-Authorization"),h("Range"),
+    h("Referer"),h("Retry-After"),h("Server"),h("Set-Cookie"),
+    h("TE"),h("Trailer"),h("Transfer-Encoding"),h("Upgrade"),
+    h("User-Agent"),h("Vary"),h("Via"),h("WWW-Authenticate"),
+    h("Warning"),h("X-Forwarded-For")
+  });
+}();
+
+std::optional<int> headers50_naive(std::string_view s) {
+  if (s == "Accept") return 0;           if (s == "Accept-Charset") return 1;
+  if (s == "Accept-Encoding") return 2;  if (s == "Accept-Language") return 3;
+  if (s == "Accept-Ranges") return 4;    if (s == "Age") return 5;
+  if (s == "Allow") return 6;            if (s == "Authorization") return 7;
+  if (s == "Cache-Control") return 8;    if (s == "Connection") return 9;
+  if (s == "Content-Encoding") return 10;if (s == "Content-Language") return 11;
+  if (s == "Content-Length") return 12;  if (s == "Content-Location") return 13;
+  if (s == "Content-Type") return 14;    if (s == "Cookie") return 15;
+  if (s == "Date") return 16;            if (s == "ETag") return 17;
+  if (s == "Expect") return 18;          if (s == "Expires") return 19;
+  if (s == "From") return 20;            if (s == "Host") return 21;
+  if (s == "If-Match") return 22;        if (s == "If-Modified-Since") return 23;
+  if (s == "If-None-Match") return 24;   if (s == "If-Range") return 25;
+  if (s == "If-Unmodified-Since") return 26; if (s == "Keep-Alive") return 27;
+  if (s == "Last-Modified") return 28;   if (s == "Location") return 29;
+  if (s == "Max-Forwards") return 30;    if (s == "Origin") return 31;
+  if (s == "Pragma") return 32;          if (s == "Proxy-Authenticate") return 33;
+  if (s == "Proxy-Authorization") return 34; if (s == "Range") return 35;
+  if (s == "Referer") return 36;         if (s == "Retry-After") return 37;
+  if (s == "Server") return 38;          if (s == "Set-Cookie") return 39;
+  if (s == "TE") return 40;              if (s == "Trailer") return 41;
+  if (s == "Transfer-Encoding") return 42; if (s == "Upgrade") return 43;
+  if (s == "User-Agent") return 44;      if (s == "Vary") return 45;
+  if (s == "Via") return 46;             if (s == "WWW-Authenticate") return 47;
+  if (s == "Warning") return 48;         if (s == "X-Forwarded-For") return 49;
+  return std::nullopt;
+}
+
+// ============================================================================
 // Verification
 // ============================================================================
 
@@ -774,7 +954,7 @@ int main(int argc, char *argv[]) {
       std::println("Filter tokens (mix and match):");
       std::println("  Workloads: hits, misses, mixed");
       std::println("  Methods:   make_perfect_map, naive, unordered_map, ankerl, absl, frozen, kronuz, gperf");
-      std::println("  Keysets:   protocol, stock, keyword, header, mime\n");
+      std::println("  Keysets:   protocol, stock, keyword, header, mime, letters, headers50\n");
       std::println("Omitting a category runs all values for that category.\n");
       std::println("Examples:");
       std::println("  {} --filter hits,make_perfect_map,protocol", argv[0]);
@@ -812,6 +992,14 @@ int main(int argc, char *argv[]) {
   };
   auto gperf_mime = [](std::string_view s) -> std::optional<int> {
     auto r = gperf_mime::MimeGperf::lookup(s.data(), s.size());
+    return r ? std::optional<int>(static_cast<int>(r[0])) : std::nullopt;
+  };
+  auto gperf_letters = [](std::string_view s) -> std::optional<int> {
+    auto r = gperf_letters::Letters26Gperf::lookup(s.data(), s.size());
+    return r ? std::optional<int>(static_cast<int>(r[0])) : std::nullopt;
+  };
+  auto gperf_headers50 = [](std::string_view s) -> std::optional<int> {
+    auto r = gperf_headers50::HttpHeaders50Gperf::lookup(s.data(), s.size());
     return r ? std::optional<int>(static_cast<int>(r[0])) : std::nullopt;
   };
 
@@ -855,6 +1043,28 @@ int main(int argc, char *argv[]) {
       {"text/xml","text/csv","application/gzip","application/wasm",
        "image/avif","image/tiff","audio/ogg","video/webm",
        "font/otf","application/x-www-form-urlencoded"});
+    all_ok &= verify_keyset("Letters a-z", letters_phf, letters_naive, letters_frozen, letters_kronuz, gperf_letters,
+      {"a","b","c","d","e","f","g","h","i","j","k","l","m",
+       "n","o","p","q","r","s","t","u","v","w","x","y","z"},
+      {"A","B","1","!","aa","zz","0","ab","yz","mn",
+       "?","@","+","-","_",".","/","~","*","$"});
+    all_ok &= verify_keyset("HTTP Headers 50", headers50_phf, headers50_naive, headers50_frozen, headers50_kronuz, gperf_headers50,
+      {"Accept","Accept-Charset","Accept-Encoding","Accept-Language",
+       "Accept-Ranges","Age","Allow","Authorization",
+       "Cache-Control","Connection","Content-Encoding","Content-Language",
+       "Content-Length","Content-Location","Content-Type","Cookie",
+       "Date","ETag","Expect","Expires",
+       "From","Host","If-Match","If-Modified-Since",
+       "If-None-Match","If-Range","If-Unmodified-Since","Keep-Alive",
+       "Last-Modified","Location","Max-Forwards","Origin",
+       "Pragma","Proxy-Authenticate","Proxy-Authorization","Range",
+       "Referer","Retry-After","Server","Set-Cookie",
+       "TE","Trailer","Transfer-Encoding","Upgrade",
+       "User-Agent","Vary","Via","WWW-Authenticate",
+       "Warning","X-Forwarded-For"},
+      {"X-Request-Id","Forwarded","Alt-Svc","DNT","Upgrade-Insecure-Requests",
+       "X-Frame-Options","Content-Security-Policy","Strict-Transport-Security",
+       "Access-Control-Allow-Origin","Content-MD5"});
     return all_ok ? 0 : 1;
   }
 
@@ -917,6 +1127,38 @@ int main(int argc, char *argv[]) {
       {"text/xml","text/csv","application/gzip","application/wasm",
        "image/avif","image/tiff","audio/ogg","video/webm",
        "font/otf","application/x-www-form-urlencoded"},
+      filter, describe);
+  }
+
+  // --- Letters a-z (26 keys, uniform single-char) ---
+  if (filter.run_keyset("letters")) {
+    run_keyset("Letters a-z", letters_phf, letters_naive, letters_frozen, letters_kronuz, gperf_letters,
+      {"a","b","c","d","e","f","g","h","i","j","k","l","m",
+       "n","o","p","q","r","s","t","u","v","w","x","y","z"},
+      {"A","B","1","!","aa","zz","0","ab","yz","mn",
+       "?","@","+","-","_",".","/","~","*","$"},
+      filter, describe);
+  }
+
+  // --- HTTP Headers 50 (50 keys, long, large realistic set) ---
+  if (filter.run_keyset("headers50")) {
+    run_keyset("HTTP Headers 50", headers50_phf, headers50_naive, headers50_frozen, headers50_kronuz, gperf_headers50,
+      {"Accept","Accept-Charset","Accept-Encoding","Accept-Language",
+       "Accept-Ranges","Age","Allow","Authorization",
+       "Cache-Control","Connection","Content-Encoding","Content-Language",
+       "Content-Length","Content-Location","Content-Type","Cookie",
+       "Date","ETag","Expect","Expires",
+       "From","Host","If-Match","If-Modified-Since",
+       "If-None-Match","If-Range","If-Unmodified-Since","Keep-Alive",
+       "Last-Modified","Location","Max-Forwards","Origin",
+       "Pragma","Proxy-Authenticate","Proxy-Authorization","Range",
+       "Referer","Retry-After","Server","Set-Cookie",
+       "TE","Trailer","Transfer-Encoding","Upgrade",
+       "User-Agent","Vary","Via","WWW-Authenticate",
+       "Warning","X-Forwarded-For"},
+      {"X-Request-Id","Forwarded","Alt-Svc","DNT","Upgrade-Insecure-Requests",
+       "X-Frame-Options","Content-Security-Policy","Strict-Transport-Security",
+       "Access-Control-Allow-Origin","Content-MD5"},
       filter, describe);
   }
 }

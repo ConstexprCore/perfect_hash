@@ -10,7 +10,6 @@
 #include <tuple>
 #include <cstddef>
 #include <cstdint>
-
 #ifndef constexprcore_really_inline
 #if defined(_MSC_VER) && !defined(__clang__)
 #define constexprcore_really_inline __forceinline
@@ -18,6 +17,10 @@
 #define constexprcore_really_inline inline __attribute__((always_inline))
 #endif
 #endif
+// NEON comparison helper (arm64 only, separate header to avoid polluting consteval)
+#include <ConstexprCore/detail/neon_compare.h>
+
+
 
 namespace ConstexprCore {
 
@@ -47,13 +50,24 @@ struct perfect_hash_set {
     std::array<std::uint8_t, detail::MAX_POSITIONS> positions_{};
     std::uint8_t min_key_len_{};
     std::array<std::uint8_t, TableSize> slot_key_len_{};                    // key length (0xFF = empty)
+#if CONSTEXPRCORE_HAS_NEON
+    std::array<std::array<char, (MaxKeyLen + 15)/16 * 16>, TableSize> slot_key_data_{};    // inline key bytes
+#else
     std::array<std::array<char, MaxKeyLen>, TableSize> slot_key_data_{};    // inline key bytes
+#endif
     std::array<std::uint64_t, TableSize> packed_keys_{};                    // first 8 bytes packed for branchless cmp
     std::array<std::uint64_t, TableSize> packed_keys2_{};                   // bytes 8-15 packed (MaxKeyLen > 8)
 
     // --- cold data (rarely accessed) ---
     std::array<std::uint8_t, TableSize> slot_to_key_{};     // hash_slot -> declaration-order index
     std::array<std::uint8_t, N> key_to_slot_{};             // declaration-order index -> slot
+
+    // --- MaxKeyLen == 1 fast path: direct char -> key-index table ---
+    // When all keys are single characters, bypasses hash computation entirely.
+    // Indexed by the raw byte value; 0xFF = not a key.
+    struct no_direct_table_t {};
+    [[no_unique_address]] std::conditional_t<MaxKeyLen == 1,
+        std::array<std::uint8_t, 256>, no_direct_table_t> direct_lookup_{};
 
     // Shared init logic for both constructors.
     consteval void init_inline_data_(const std::array<std::string_view, N>& keys) {
@@ -76,7 +90,16 @@ struct perfect_hash_set {
             }
         }
 
-        // Step 3: Build packed_keys_ for fast key comparison.
+        // Step 3: Build direct lookup table for MaxKeyLen == 1.
+        if constexpr (MaxKeyLen == 1) {
+            for (std::size_t c = 0; c < 256; ++c)
+                direct_lookup_[c] = 0xFF;
+            for (std::size_t i = 0; i < N; ++i)
+                if (!keys[i].empty())
+                    direct_lookup_[static_cast<unsigned char>(keys[i][0])] = static_cast<std::uint8_t>(i);
+        }
+
+        // Step 4: Build packed_keys_ for fast key comparison.
         for (std::size_t s = 0; s < TableSize; ++s) {
             if (slot_to_key_[s] < N) {
                 auto k = keys[slot_to_key_[s]];
@@ -297,14 +320,22 @@ struct perfect_hash_set {
                 }
                 return encoded == packed_keys_[slot];
             } else if constexpr (MaxKeyLen <= 8) {
+#if CONSTEXPRCORE_HAS_NEON
+                // ARM64 NEON: page-safe 16-byte load + TBL masking + uint64 extract.
+                // Replaces ~24 insn of safe_byte packing with ~5 NEON insn.
+                return detail::neon_compare_8(p, len, packed_keys_[slot]);
+#else
                 // Branchless safe_byte pack: packs all key bytes into uint64.
-                // Slightly more instructions than overlap, but zero branch misses
-                // since safe_byte_ uses conditional arithmetic (no branches).
+                // Zero branch misses since safe_byte_ uses conditional arithmetic.
                 return pack_input_(p, len) == packed_keys_[slot];
+#endif
             } else if constexpr (MaxKeyLen <= 16) {
-#ifdef __clang__
-                // MaxKeyLen 9-16: two packed uint64 words, fully branchless.
-                // Avoids the byte loop that compilers convert to early-exit branches.
+#if CONSTEXPRCORE_HAS_NEON
+                // ARM64 NEON: page-safe 16-byte load + TBL masking + vceqq.
+                // Replaces ~48 insn of safe_byte packing with ~5 NEON insn.
+                return detail::neon_compare_16(p, len, slot_key_data_[slot].data());
+#elif defined(__clang__)
+                // Scalar fallback: two packed uint64 words, fully branchless.
                 std::uint64_t input_val;
                 if consteval {
                     input_val = pack_input_(p, len);
@@ -351,6 +382,13 @@ struct perfect_hash_set {
     }
 
     [[nodiscard]] constexpr constexprcore_really_inline bool contains(std::string_view key) const noexcept {
+        // MaxKeyLen == 1 fast path: direct byte-indexed lookup, no hash needed.
+        if constexpr (MaxKeyLen == 1) {
+            if (key.size() == 1)
+                return direct_lookup_[static_cast<unsigned char>(key[0])] != 0xFF;
+            if (key.size() > 1) return false;
+            // key.empty(): fall through to general path (handles sets containing "")
+        }
         // Reject empty keys early only when no empty key exists in the set.
         // min_key_len_ is a struct constant so this branch compiles away.
         if (min_key_len_ > 0 && key.empty()) return false;
@@ -392,11 +430,19 @@ struct perfect_hash_set {
     }
 
     [[nodiscard]] constexpr constexprcore_really_inline std::optional<std::size_t> index_of(std::string_view key) const noexcept {
+        if constexpr (MaxKeyLen == 1) {
+            if (key.size() == 1) {
+                auto idx = direct_lookup_[static_cast<unsigned char>(key[0])];
+                return idx != 0xFF ? std::optional<std::size_t>{idx} : std::nullopt;
+            }
+            if (key.size() > 1) return std::nullopt;
+            // key.empty(): fall through to general path
+        }
         if (min_key_len_ > 0 && key.empty()) return std::nullopt;
         auto len = key.size();
         auto clamped_len = len <= MaxKeyLen ? len : MaxKeyLen;
         std::size_t slot = compute_hash(key);
-        bool len_ok = (slot_key_len_[slot] == len); // can cause branch mispredictions when there are misses.
+        bool len_ok = (slot_key_len_[slot] == len);
         bool key_ok = compare_key_(key.data(), clamped_len, slot);
         auto is_ok = len_ok & key_ok;
         return is_ok ? std::optional<std::size_t>{slot_to_key_[slot]} : std::nullopt;
