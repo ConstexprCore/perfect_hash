@@ -353,9 +353,37 @@ struct perfect_hash_set {
 #else
                 return std::equal(p, p + len, slot_key_data_[slot].data());
 #endif
+            } else if constexpr (MaxKeyLen <= 32) {
+#if CONSTEXPRCORE_HAS_NEON
+                // ARM64 NEON: two-pass 16-byte comparison for MaxKeyLen 17-32.
+                // Replaces pack_input_ + byte loop (~120 insn) with ~10 NEON insn.
+                return detail::neon_compare_32(p, len, slot_key_data_[slot].data());
+#elif defined(__clang__)
+                // Scalar fallback: first 8 bytes packed, then byte loop.
+                std::uint64_t input_val;
+                if consteval {
+                    input_val = pack_input_(p, len);
+                } else {
+                    if (min_key_len_ >= 8) {
+                        __builtin_memcpy(&input_val, p, 8);
+                    } else {
+                        input_val = pack_input_(p, len);
+                    }
+                }
+                const char* a = slot_key_data_[slot].data();
+                std::uint64_t diff = input_val ^ packed_keys_[slot];
+                for (std::size_t i = 8; i < MaxKeyLen; ++i) {
+                    std::uint64_t a_byte = static_cast<unsigned char>(a[i]);
+                    std::uint64_t p_byte = safe_byte_(p, len, i);
+                    diff |= (a_byte ^ p_byte);
+                }
+                return diff == 0;
+#else
+                return std::equal(p, p + len, slot_key_data_[slot].data());
+#endif
             } else {
 #ifdef __clang__
-                // MaxKeyLen > 16: first 8 bytes packed, then byte loop.
+                // MaxKeyLen > 32: first 8 bytes packed, then byte loop.
                 std::uint64_t input_val;
                 if consteval {
                     input_val = pack_input_(p, len);
