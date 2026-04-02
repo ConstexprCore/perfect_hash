@@ -353,9 +353,37 @@ struct perfect_hash_set {
 #else
                 return std::equal(p, p + len, slot_key_data_[slot].data());
 #endif
+            } else if constexpr (MaxKeyLen <= 32) {
+#if CONSTEXPRCORE_HAS_NEON
+                // ARM64 NEON: two-pass 16-byte comparison for MaxKeyLen 17-32.
+                // Replaces pack_input_ + byte loop (~120 insn) with ~10 NEON insn.
+                return detail::neon_compare_32(p, len, slot_key_data_[slot].data());
+#elif defined(__clang__)
+                // Scalar fallback: first 8 bytes packed, then byte loop.
+                std::uint64_t input_val;
+                if consteval {
+                    input_val = pack_input_(p, len);
+                } else {
+                    if (min_key_len_ >= 8) {
+                        __builtin_memcpy(&input_val, p, 8);
+                    } else {
+                        input_val = pack_input_(p, len);
+                    }
+                }
+                const char* a = slot_key_data_[slot].data();
+                std::uint64_t diff = input_val ^ packed_keys_[slot];
+                for (std::size_t i = 8; i < MaxKeyLen; ++i) {
+                    std::uint64_t a_byte = static_cast<unsigned char>(a[i]);
+                    std::uint64_t p_byte = safe_byte_(p, len, i);
+                    diff |= (a_byte ^ p_byte);
+                }
+                return diff == 0;
+#else
+                return std::equal(p, p + len, slot_key_data_[slot].data());
+#endif
             } else {
 #ifdef __clang__
-                // MaxKeyLen > 16: first 8 bytes packed, then byte loop.
+                // MaxKeyLen > 32: first 8 bytes packed, then byte loop.
                 std::uint64_t input_val;
                 if consteval {
                     input_val = pack_input_(p, len);
@@ -429,6 +457,19 @@ struct perfect_hash_set {
             return h % TableSize;
     }
 
+    // Returns the hash slot if key matches (for slot-ordered value lookup).
+    // Unlike index_of() which returns the declaration-order index, this returns
+    // the raw slot, saving one dependent load (slot_to_key_[slot]).
+    [[nodiscard]] constexpr constexprcore_really_inline std::optional<std::size_t> slot_match(std::string_view key) const noexcept {
+        if (min_key_len_ > 0 && key.empty()) return std::nullopt;
+        auto len = key.size();
+        auto clamped_len = len <= MaxKeyLen ? len : MaxKeyLen;
+        std::size_t slot = compute_hash(key);
+        bool len_ok = (slot_key_len_[slot] == len);
+        bool key_ok = compare_key_(key.data(), clamped_len, slot);
+        return (len_ok & key_ok) ? std::optional<std::size_t>{slot} : std::nullopt;
+    }
+
     [[nodiscard]] constexpr constexprcore_really_inline std::optional<std::size_t> index_of(std::string_view key) const noexcept {
         if constexpr (MaxKeyLen == 1) {
             if (key.size() == 1) {
@@ -457,19 +498,31 @@ template <std::size_t N, typename ValueT, std::size_t TableSize = N, std::size_t
 struct perfect_hash_map {
     perfect_hash_set<N, TableSize, MaxKeyLen> set_;
     std::array<ValueT, N> values_{};
+    std::array<std::remove_const_t<ValueT>, TableSize> slot_values_{};  // values in slot order for direct access
+
+    consteval void init_slot_values_(const std::array<ValueT, N>& values) {
+        for (std::size_t s = 0; s < TableSize; ++s) {
+            auto ki = set_.slot_to_key_[s];
+            if (ki < N) *(slot_values_.data() + s) = *(values.data() + ki);
+        }
+    }
 
     consteval perfect_hash_map(
         const std::array<std::string_view, N>& keys,
         const std::array<ValueT, N>& values)
         : set_{keys}, values_{values}
-    {}
+    {
+        init_slot_values_(values);
+    }
 
     consteval perfect_hash_map(
         const std::array<std::string_view, N>& keys,
         const std::array<ValueT, N>& values,
         const detail::phf_result<N>& data)
         : set_{keys, data}, values_{values}
-    {}
+    {
+        init_slot_values_(values);
+    }
 
     [[nodiscard]] constexpr std::size_t size() const noexcept { return N; }
 
@@ -488,12 +541,19 @@ struct perfect_hash_map {
     }
 
     [[nodiscard]] constexpr constexprcore_really_inline std::optional<ValueT> lookup(std::string_view key) const noexcept {
-        auto idx = set_.index_of(key);
-        if (idx.has_value()) {
-            return values_[*idx];
+        if constexpr (MaxKeyLen == 1) {
+            // Direct table path: index_of already returns declaration-order index
+            auto idx = set_.index_of(key);
+            if (idx.has_value()) return values_[*idx];
+            return std::nullopt;
+        } else {
+            // Fast path: hash → slot → slot_values_[slot] (one load, no indirection)
+            auto slot_match = set_.slot_match(key);
+            if (slot_match.has_value()) return slot_values_[*slot_match];
+            return std::nullopt;
         }
-        return std::nullopt;
     }
+
 };
 
 // ============================================================================
