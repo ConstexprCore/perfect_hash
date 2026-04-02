@@ -13,6 +13,17 @@ if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Choose the type of build." FORCE)
 endif()
 
+option(CONSTEXPRCORE_SANITIZE "Enable address sanitizer" OFF)
+if(CONSTEXPRCORE_SANITIZE)
+    if(MSVC)
+        add_compile_options(/fsanitize=address)
+        add_link_options(/fsanitize=address)
+    else()
+        add_compile_options(-fsanitize=address -fno-omit-frame-pointer)
+        add_link_options(-fsanitize=address)
+    endif()
+endif()
+
 include(FetchContent)
 
 set(UA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
