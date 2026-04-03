@@ -19,6 +19,7 @@
 #endif
 // NEON comparison helper (arm64 only, separate header to avoid polluting consteval)
 #include <ConstexprCore/detail/neon_compare.h>
+#include <ConstexprCore/detail/neon_smh.h>
 
 
 
@@ -69,6 +70,26 @@ struct perfect_hash_set {
     [[no_unique_address]] std::conditional_t<MaxKeyLen == 1,
         std::array<std::uint8_t, 256>, no_direct_table_t> direct_lookup_{};
 
+#if CONSTEXPRCORE_HAS_NEON
+    // SMH (Shuffle-based Matching) data for small key sets.
+    // Active when MaxKeyLen <= 16 and total key length (with padding) <= 32.
+    static constexpr bool SMH_ELIGIBLE = MaxKeyLen <= 16;
+
+    struct no_smh_data_t {};
+    struct smh_data_t {
+        alignas(16) std::uint8_t packed[32]{};                       // all keys concatenated (padded)
+        std::uint8_t shuffle0[16]{};                                  // global shuffle for packed[0:15]
+        std::uint8_t shuffle1[16]{};                                  // global shuffle for packed[16:31]
+        std::array<std::uint64_t, MaxKeyLen + 1> msb_mask{};         // per-length MSB masks
+        std::array<std::uint64_t, MaxKeyLen + 1> lsb_mask{};         // per-length LSB masks
+        std::uint8_t bit_to_key[64]{};                                // MSB bit position -> key index
+    };
+
+    [[no_unique_address]] std::conditional_t<SMH_ELIGIBLE,
+        smh_data_t, no_smh_data_t> smh_data_{};
+    bool use_smh_{false};
+#endif
+
     // Shared init logic for both constructors.
     consteval void init_inline_data_(const std::array<std::string_view, N>& keys) {
         // Step 1: Compute min key length for fast rejection in contains().
@@ -99,7 +120,69 @@ struct perfect_hash_set {
                     direct_lookup_[static_cast<unsigned char>(keys[i][0])] = static_cast<std::uint8_t>(i);
         }
 
-        // Step 4: Build packed_keys_ for fast key comparison.
+        // Step 4: Build SMH data for NEON shuffle-based matching.
+#if CONSTEXPRCORE_HAS_NEON
+        if constexpr (SMH_ELIGIBLE) {
+            // Compute padded offsets: skip position 4k+3 at key boundaries
+            // so every key has at least one visible byte in the mask.
+            std::array<std::size_t, N> offsets{};
+            std::size_t cursor = 0;
+            for (std::size_t i = 0; i < N; ++i) {
+                if (cursor % 4 == 3) ++cursor; // skip invisible start
+                offsets[i] = cursor;
+                cursor += keys[i].size();
+            }
+            if (cursor <= 32) {
+                use_smh_ = true;
+
+                // Pack all keys; fill unused bytes with non-zero sentinel
+                for (std::size_t i = 0; i < 32; ++i)
+                    smh_data_.packed[i] = 0x01;
+                for (std::size_t i = 0; i < N; ++i)
+                    for (std::size_t j = 0; j < keys[i].size(); ++j)
+                        smh_data_.packed[offsets[i] + j] =
+                            static_cast<std::uint8_t>(keys[i][j]);
+
+                // Build global shuffle tables: each packed position maps to
+                // the query byte index of the key that owns it.
+                for (std::size_t j = 0; j < 16; ++j) {
+                    smh_data_.shuffle0[j] = 0x80;
+                    smh_data_.shuffle1[j] = 0x80;
+                }
+                for (std::size_t i = 0; i < N; ++i) {
+                    for (std::size_t j = 0; j < keys[i].size(); ++j) {
+                        std::size_t pos = offsets[i] + j;
+                        if (pos < 16)
+                            smh_data_.shuffle0[pos] =
+                                static_cast<std::uint8_t>(j);
+                        else
+                            smh_data_.shuffle1[pos - 16] =
+                                static_cast<std::uint8_t>(j);
+                    }
+                }
+
+                // Build per-length carry-trick masks and bit→key LUT
+                for (std::size_t i = 0; i < 64; ++i)
+                    smh_data_.bit_to_key[i] = 0xFF;
+                for (std::size_t i = 0; i < N; ++i) {
+                    std::size_t L = keys[i].size();
+                    int lsb = detail::smh_bit_lsb(offsets[i]);
+                    int msb = detail::smh_key_msb(offsets[i], keys[i].size());
+                    if (lsb >= 0)
+                        smh_data_.lsb_mask[L] |=
+                            static_cast<std::uint64_t>(1) << lsb;
+                    if (msb >= 0) {
+                        smh_data_.msb_mask[L] |=
+                            static_cast<std::uint64_t>(1) << msb;
+                        smh_data_.bit_to_key[msb] =
+                            static_cast<std::uint8_t>(i);
+                    }
+                }
+            }
+        }
+#endif
+
+        // Step 5: Build packed_keys_ for fast key comparison.
         for (std::size_t s = 0; s < TableSize; ++s) {
             if (slot_to_key_[s] < N) {
                 auto k = keys[slot_to_key_[s]];
@@ -220,6 +303,14 @@ struct perfect_hash_set {
     [[nodiscard]] constexpr std::size_t table_size() const noexcept { return TableSize; }
 
     [[nodiscard]] constexpr std::string_view algorithm_name() const noexcept {
+#if CONSTEXPRCORE_HAS_NEON
+        // SMH fast path: compare against all packed keys of matching length.
+        if constexpr (SMH_ELIGIBLE) {
+            if (use_smh_) {
+                return "SMH";
+            }
+        }
+#endif
         return num_positions_ == HD_MODE ? std::string_view("H&D") : std::string_view("gperf");
     }
     [[nodiscard]] constexpr std::string algorithm_description() const noexcept {
@@ -417,6 +508,22 @@ struct perfect_hash_set {
             if (key.size() > 1) return false;
             // key.empty(): fall through to general path (handles sets containing "")
         }
+#if CONSTEXPRCORE_HAS_NEON
+        // SMH fast path: compare against all packed keys of matching length
+        // simultaneously — no hash computation needed.
+        if constexpr (SMH_ELIGIBLE) {
+            if (!std::is_constant_evaluated() && use_smh_
+                && key.size() >= 1 && key.size() <= MaxKeyLen) {
+                std::uint64_t result = detail::neon_smh_match(
+                    key.data(), key.size(),
+                    smh_data_.packed,
+                    smh_data_.shuffle0, smh_data_.shuffle1,
+                    smh_data_.msb_mask[key.size()],
+                    smh_data_.lsb_mask[key.size()]);
+                return result != 0;
+            }
+        }
+#endif
         // Reject empty keys early only when no empty key exists in the set.
         // min_key_len_ is a struct constant so this branch compiles away.
         if (min_key_len_ > 0 && key.empty()) return false;
@@ -461,6 +568,26 @@ struct perfect_hash_set {
     // Unlike index_of() which returns the declaration-order index, this returns
     // the raw slot, saving one dependent load (slot_to_key_[slot]).
     [[nodiscard]] constexpr constexprcore_really_inline std::optional<std::size_t> slot_match(std::string_view key) const noexcept {
+#if CONSTEXPRCORE_HAS_NEON
+        // SMH fast path: compare against all packed keys of matching length.
+        if constexpr (SMH_ELIGIBLE) {
+            if (!std::is_constant_evaluated() && use_smh_
+                && key.size() >= 1 && key.size() <= MaxKeyLen) {
+                std::uint64_t result = detail::neon_smh_match(
+                    key.data(), key.size(),
+                    smh_data_.packed,
+                    smh_data_.shuffle0, smh_data_.shuffle1,
+                    smh_data_.msb_mask[key.size()],
+                    smh_data_.lsb_mask[key.size()]);
+                if (result) {
+                    int bit = __builtin_ctzll(result);
+                    std::size_t ki = smh_data_.bit_to_key[bit];
+                    return ki;
+                }
+                return std::nullopt;
+            }
+        }
+#endif
         if (min_key_len_ > 0 && key.empty()) return std::nullopt;
         auto len = key.size();
         auto clamped_len = len <= MaxKeyLen ? len : MaxKeyLen;
@@ -471,6 +598,26 @@ struct perfect_hash_set {
     }
 
     [[nodiscard]] constexpr constexprcore_really_inline std::optional<std::size_t> index_of(std::string_view key) const noexcept {
+#if CONSTEXPRCORE_HAS_NEON
+        // SMH fast path: compare against all packed keys of matching length.
+        if constexpr (SMH_ELIGIBLE) {
+            if (!std::is_constant_evaluated() && use_smh_
+                && key.size() >= 1 && key.size() <= MaxKeyLen) {
+                std::uint64_t result = detail::neon_smh_match(
+                    key.data(), key.size(),
+                    smh_data_.packed,
+                    smh_data_.shuffle0, smh_data_.shuffle1,
+                    smh_data_.msb_mask[key.size()],
+                    smh_data_.lsb_mask[key.size()]);
+                if (result) {
+                    int bit = __builtin_ctzll(result);
+                    std::size_t ki = smh_data_.bit_to_key[bit];
+                    return ki;
+                }
+                return std::nullopt;
+            }
+        }
+#endif
         if constexpr (MaxKeyLen == 1) {
             if (key.size() == 1) {
                 auto idx = direct_lookup_[static_cast<unsigned char>(key[0])];
