@@ -25,6 +25,12 @@
 
 namespace ConstexprCore::detail {
 
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Warray-bounds"
+#pragma GCC diagnostic ignored "-Wstringop-overread"
+#endif
+
 // AND masks: bytes at index < len are 0xFF, bytes at index >= len are 0x00.
 // Used to zero-out input bytes beyond the key length before comparison.
 inline constexpr std::uint8_t and_masks[17][16] = {
@@ -127,14 +133,9 @@ constexprcore_really_inline bool sse2_compare_32(const char* p, std::size_t len,
 
     // --- Tail bytes (16+) ---
     std::size_t tail_len = len > 16 ? len - 16 : 0;
-    __m128i input2;
-    if (tail_len > 0) {
-        __m128i raw2 = page_safe_load_16(p + 16, tail_len);
-        __m128i mask2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(and_masks[tail_len]));
-        input2 = _mm_and_si128(raw2, mask2);
-    } else {
-        input2 = _mm_setzero_si128();
-    }
+    __m128i raw2 = tail_len > 0 ? page_safe_load_16(p + 16, tail_len) : _mm_setzero_si128();
+    __m128i mask2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(and_masks[tail_len]));
+    __m128i input2 = _mm_and_si128(raw2, mask2);
     __m128i stored2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(stored + 16));
     __m128i cmp2 = _mm_cmpeq_epi8(input2, stored2);
 
@@ -142,6 +143,10 @@ constexprcore_really_inline bool sse2_compare_32(const char* p, std::size_t len,
     __m128i combined = _mm_and_si128(cmp1, cmp2);
     return _mm_movemask_epi8(combined) == 0xFFFF;
 }
+
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 } // namespace ConstexprCore::detail
 
