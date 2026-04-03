@@ -25,6 +25,12 @@
 
 namespace ConstexprCore::detail {
 
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Warray-bounds"
+#pragma GCC diagnostic ignored "-Wstringop-overread"
+#endif
+
 // AND masks: bytes at index < len are 0xFF, bytes at index >= len are 0x00.
 // Used to zero-out input bytes beyond the key length before comparison.
 inline constexpr std::uint8_t and_masks[17][16] = {
@@ -142,6 +148,10 @@ constexprcore_really_inline bool sse2_compare_32(const char* p, std::size_t len,
     __m128i combined = _mm_and_si128(cmp1, cmp2);
     return _mm_movemask_epi8(combined) == 0xFFFF;
 }
+
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 } // namespace ConstexprCore::detail
 
