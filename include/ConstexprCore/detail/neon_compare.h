@@ -10,6 +10,14 @@
 #endif // defined(_MSC_VER) && !defined(__clang__)
 #endif // constexprcore_really_inline
 
+#ifndef CONSTEXPRCORE_NO_SANITIZE_ADDRESS
+#if defined(__GNUC__) || defined(__clang__)
+#define CONSTEXPRCORE_NO_SANITIZE_ADDRESS __attribute__((no_sanitize("address")))
+#else
+#define CONSTEXPRCORE_NO_SANITIZE_ADDRESS
+#endif
+#endif // CONSTEXPRCORE_NO_SANITIZE_ADDRESS
+
 #if defined(__aarch64__) && !defined(CONSTEXPRCORE_NO_NEON)
 #include <arm_neon.h>
 #include <cstdint>
@@ -43,9 +51,14 @@ inline constexpr std::uint8_t tbl_masks[17][16] = {
 
 // Page-safe 16-byte load helper. Returns raw NEON vector from p.
 // Falls back to byte-by-byte copy for addresses near page boundaries.
-constexprcore_really_inline uint8x16_t page_safe_load_16(const char* p, std::size_t len) noexcept {
+CONSTEXPRCORE_NO_SANITIZE_ADDRESS constexprcore_really_inline uint8x16_t page_safe_load_16(const char* p, std::size_t len) noexcept {
     uintptr_t addr = reinterpret_cast<uintptr_t>(p);
-    if (__builtin_expect((addr & 16383) <= 16368, 1)) {
+    // The page size can be as low as 4KB, so check the lower 12 bits for safety.
+    // Importantly, we cannot know at compile time what the page size will be.
+    // On Apple Silicon, the page size is 16KB, but it could change in the future.
+    // Apple could decide to go back to 4KB pages. Or whatever. What we can
+    // expect however is that nobody will go down under 4KB pages, so checking the lower 12 bits is a safe bet.
+    if (__builtin_expect((addr & 4096) <= 4096 - 8, 1)) {
         return vld1q_u8(reinterpret_cast<const uint8_t*>(p));
     }
     alignas(16) std::uint8_t buf[16] = {};
