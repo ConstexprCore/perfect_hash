@@ -361,11 +361,16 @@ struct perfect_hash_set {
                 return std::equal(p, p + len, slot_key_data_[slot].data());
 #endif
             } else if constexpr (MaxKeyLen <= 32) {
-#if CONSTEXPRCORE_HAS_NEON
+///////////////
+// We disallowed MaxKeyLen > 32 for SIMD-optimized paths since they are not necessarily faster.
+// Set the macros CONSTEXPRCORE_USE_NEON_FOR_32_BYTE_COMPARE and CONSTEXPRCORE_USE_SSE2_FOR_32_BYTE_COMPARE 
+// to enable these paths if desired.
+//////////////
+#if CONSTEXPRCORE_HAS_NEON && CONSTEXPRCORE_USE_NEON_FOR_32_BYTE_COMPARE
                 // ARM64 NEON: two-pass 16-byte comparison for MaxKeyLen 17-32.
                 // Replaces pack_input_ + byte loop (~120 insn) with ~10 NEON insn.
                 return detail::neon_compare_32(p, len, slot_key_data_[slot].data());
-#elif CONSTEXPRCORE_HAS_SSE2
+#elif CONSTEXPRCORE_HAS_SSE2 && CONSTEXPRCORE_USE_SSE2_FOR_32_BYTE_COMPARE
                 // x86-64 SSE2: two-pass 16-byte comparison for MaxKeyLen 17-32.
                 return detail::sse2_compare_32(p, len, slot_key_data_[slot].data());
 #elif defined(__clang__)
