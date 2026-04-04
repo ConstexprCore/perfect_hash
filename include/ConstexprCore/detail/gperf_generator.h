@@ -306,7 +306,21 @@ consteval std::size_t select_positions(
     throw "Failed to find distinguishing positions for perfect hash";
 }
 
-// Non-throwing variant: returns true on success, false on failure.
+// Partition-based asso_values search, inspired by GNU gperf.
+//
+// Instead of a collision-bump loop (which cycles for large N), this algorithm
+// determines asso_values one (position, character) symbol at a time and never
+// changes a value once set.  The correctness invariant is maintained via
+// equivalence classes: two keywords whose remaining undetermined symbols are
+// identical must already have distinct partial hashes (mod M), because no
+// future determination can separate them.
+//
+// Complexity: O(num_symbols * search_range * N) where num_symbols is the
+// number of unique (position, character) pairs (~alphabet_size * positions),
+// search_range is typically O(M), and N is the keyword count.  In practice
+// this is far faster than the collision-bump approach for large N because
+// each symbol's search space is small and independent.
+//
 // M is the table size (number of hash slots). Defaults to N (minimal PHF).
 // When M > N, the hash is non-minimal: some slots remain empty (sentinel = N).
 template <std::size_t N, std::size_t M = N>
@@ -320,126 +334,163 @@ consteval bool try_generate_gperf(
     // Phase 1: Position selection (use M as modulus since hash computes % M)
     num_positions = select_positions<N>(keys, positions, M);
 
-    // Compute the hash value for a given key using the current association values and positions.
-    auto compute = [&](std::string_view key) -> std::size_t {
-        std::size_t h = key.size();
-        for (std::size_t i = 0; i < num_positions; ++i) {
-            std::size_t pos = positions[i];
-            std::size_t ch = char_at(key, pos);
-            if (ch < 256) {
-                h += asso_values[i][ch];
-            }
-        }
-        return h % M;
-    };
+    // Initialize all asso_values to 0.
+    for (std::size_t p = 0; p < MAX_POSITIONS; ++p)
+        for (std::size_t c = 0; c < 256; ++c)
+            asso_values[p][c] = 0;
 
-    // Pre-compute character frequencies per position ONCE (not per-collision).
-    std::array<std::array<std::size_t, 256>, MAX_POSITIONS> char_freq{};
-    for (std::size_t k = 0; k < N; ++k) {
-        for (std::size_t p = 0; p < num_positions; ++p) {
-            std::size_t ch = char_at(keys[k], positions[p]);
-            if (ch < 256) { ++char_freq[p][ch]; }
+    // If lengths alone distinguish all keys, no asso_values needed.
+    if (num_positions == 0) {
+        for (std::size_t i = 0; i < M; ++i) slot_to_key[i] = N;
+        for (std::size_t i = 0; i < N; ++i) {
+            std::size_t slot = keys[i].size() % M;
+            if (slot_to_key[slot] != N) return false;
+            slot_to_key[slot] = i;
         }
+        return true;
     }
 
-    std::size_t jump_values[12];
-    std::size_t num_jumps = 0;
-    auto make_odd = [](std::size_t v) -> std::size_t { return v | 1; };
+    // Phase 2: Pre-compute each keyword's character at each selected position.
+    std::array<std::array<std::size_t, MAX_POSITIONS>, N> kchars{};
+    for (std::size_t k = 0; k < N; ++k)
+        for (std::size_t p = 0; p < num_positions; ++p)
+            kchars[k][p] = char_at(keys[k], positions[p]);
 
-    jump_values[num_jumps++] = make_odd(M / 3 > 0 ? M / 3 : 1);
-    jump_values[num_jumps++] = 1;
-    jump_values[num_jumps++] = 3;
-    jump_values[num_jumps++] = 5;
-    jump_values[num_jumps++] = 7;
-    jump_values[num_jumps++] = make_odd(M / 2 > 0 ? M / 2 : 1);
-    jump_values[num_jumps++] = make_odd(M > 1 ? M - 1 : 1);
-    jump_values[num_jumps++] = make_odd(M / 4 > 0 ? M / 4 : 1);
-    jump_values[num_jumps++] = 9;
-    jump_values[num_jumps++] = 11;
-    jump_values[num_jumps++] = 13;
-    jump_values[num_jumps++] = make_odd(M > 0 ? M : 1);
+    // Phase 3: Enumerate unique (position, character) symbols and their
+    // frequencies.  These are the "variables" we need to assign values to.
+    struct sym_t { std::size_t pos; std::size_t ch; std::size_t freq; };
+    constexpr std::size_t MAX_SYMS = MAX_POSITIONS * 256;
+    std::array<sym_t, MAX_SYMS> syms{};
+    std::size_t nsyms = 0;
 
-    // Reduced iteration budget from M*2000 to M*500 to keep consteval
-    // compile times bounded. With power-of-2 table doubling, failing fast
-    // on tight tables and retrying with 2x space is more efficient than
-    // exhaustively searching a tight table.
-    std::size_t max_iterations = M * 500;
-    if (max_iterations < 2000) max_iterations = 2000;
+    for (std::size_t p = 0; p < num_positions; ++p) {
+        std::array<std::size_t, 256> freq{};
+        for (std::size_t k = 0; k < N; ++k) {
+            std::size_t c = kchars[k][p];
+            if (c < 256) freq[c]++;
+        }
+        for (std::size_t c = 0; c < 256; ++c)
+            if (freq[c] > 0)
+                syms[nsyms++] = {p, c, freq[c]};
+    }
 
-    for (std::size_t ji = 0; ji < num_jumps; ++ji) {
-        std::size_t jump = jump_values[ji];
-        for (std::size_t pi = 0; pi < num_positions; ++pi)
-            for (std::size_t i = 0; i < 256; ++i) asso_values[pi][i] = 0;
-
-        bool solved = false;
-        for (std::size_t iter = 0; iter < max_iterations; ++iter) {
-            bool has_collision = false;
-            std::size_t col_a = 0, col_b = 0;
-
-            std::array<std::size_t, M> slot_owner{};
-            for (std::size_t s = 0; s < M; ++s) slot_owner[s] = N;
-
-            for (std::size_t k = 0; k < N; ++k) {
-                std::size_t h = compute(keys[k]);
-                if (slot_owner[h] != N) {
-                    col_a = slot_owner[h];
-                    col_b = k;
-                    has_collision = true;
-                    break;
-                }
-                slot_owner[h] = k;
+    // Sort symbols by decreasing frequency.  High-frequency symbols affect
+    // more keywords, so determining them first (when the partition is coarsest
+    // and we have the most freedom) produces smaller asso_values.
+    for (std::size_t i = 0; i < nsyms; ++i)
+        for (std::size_t j = i + 1; j < nsyms; ++j)
+            if (syms[j].freq > syms[i].freq) {
+                auto tmp = syms[i]; syms[i] = syms[j]; syms[j] = tmp;
             }
 
-            if (!has_collision) {
-                solved = true;
-                break;
-            }
+    // Phase 4: Determine asso_values one symbol at a time.
+    //
+    // For each symbol (p, c) we:
+    //   1. Compute equivalence classes: keywords grouped by their set of
+    //      undetermined symbols (after marking (p,c) as determined).
+    //   2. Try values v = 0, 1, ... for asso_values[p][c].
+    //   3. Accept the first v where, within every equivalence class,
+    //      all partial hashes (mod M) are distinct.
 
-            std::size_t diff_pi = 0;
+    // Track which (pos, char) pairs have been determined.
+    std::array<std::array<bool, 256>, MAX_POSITIONS> determined{};
+
+    // Partial hash for each keyword (sum of key length + determined asso_values).
+    std::array<std::size_t, N> phash{};
+    for (std::size_t k = 0; k < N; ++k)
+        phash[k] = keys[k].size();
+
+    // Equivalence class machinery: signatures and sorted order.
+    std::array<std::size_t, N> sig{};
+    std::array<std::size_t, N> order{};
+
+    // Collision detection via generation counter (avoids clearing a size-M
+    // array for every equivalence class check).
+    std::array<std::size_t, M> slot_gen{};
+    std::size_t gen = 0;
+
+    // Search limit for each symbol's asso_value.
+    std::size_t search_limit = next_power_of_2(M);
+    if (search_limit < 32) search_limit = 32;
+
+    for (std::size_t si = 0; si < nsyms; ++si) {
+        std::size_t sp = syms[si].pos;
+        std::size_t sc = syms[si].ch;
+
+        // Compute equivalence class signatures.  Two keywords are equivalent
+        // if they have the same set of undetermined (pos, char) pairs after
+        // marking (sp, sc) as determined.  We hash the undetermined set.
+        for (std::size_t k = 0; k < N; ++k) {
+            std::size_t s = 0;
             for (std::size_t p = 0; p < num_positions; ++p) {
-                std::size_t ca = char_at(keys[col_a], positions[p]);
-                std::size_t cb = char_at(keys[col_b], positions[p]);
-                if (ca != cb && (ca < 256 || cb < 256)) {
-                    diff_pi = p;
-                    break;
+                std::size_t c = kchars[k][p];
+                if (c < 256 && !determined[p][c] && !(p == sp && c == sc))
+                    s = s * 997 + (p * 257 + c + 1);
+            }
+            sig[k] = s;
+            order[k] = k;
+        }
+
+        // Sort keyword indices by signature to group equivalence classes.
+        for (std::size_t i = 0; i < N; ++i)
+            for (std::size_t j = i + 1; j < N; ++j)
+                if (sig[order[j]] < sig[order[i]]) {
+                    auto tmp = order[i]; order[i] = order[j]; order[j] = tmp;
                 }
+
+        // Try values for asso_values[sp][sc].
+        bool found = false;
+        for (std::size_t v = 0; v < search_limit && !found; ++v) {
+            bool collision = false;
+
+            // Scan equivalence classes (consecutive blocks with equal sig).
+            std::size_t ci = 0;
+            while (ci < N && !collision) {
+                std::size_t class_sig = sig[order[ci]];
+                std::size_t cj = ci;
+                while (cj < N && sig[order[cj]] == class_sig) ++cj;
+
+                // Only check classes with more than one member.
+                if (cj - ci > 1) {
+                    ++gen;
+                    for (std::size_t x = ci; x < cj; ++x) {
+                        std::size_t k = order[x];
+                        std::size_t h = phash[k];
+                        if (kchars[k][sp] == sc) h += v;
+                        h %= M;
+                        if (slot_gen[h] == gen) {
+                            collision = true;
+                            break;
+                        }
+                        slot_gen[h] = gen;
+                    }
+                }
+                ci = cj;
             }
 
-            std::size_t ch_a = char_at(keys[col_a], positions[diff_pi]);
-            std::size_t ch_b = char_at(keys[col_b], positions[diff_pi]);
-
-            std::size_t bump_char;
-            if (ch_a >= 256) {
-                bump_char = ch_b;
-            } else if (ch_b >= 256) {
-                bump_char = ch_a;
-            } else {
-                bump_char = (char_freq[diff_pi][ch_a] <= char_freq[diff_pi][ch_b]) ? ch_a : ch_b;
-            }
-
-            if (bump_char < 256) {
-                asso_values[diff_pi][bump_char] += jump;
+            if (!collision) {
+                asso_values[sp][sc] = v;
+                for (std::size_t k = 0; k < N; ++k)
+                    if (kchars[k][sp] == sc) phash[k] += v;
+                found = true;
             }
         }
 
-        if (solved) {
-            // Verify that the computed hash function produces a perfect hash: no collisions and all keys are assigned to unique slots.
-            for (std::size_t i = 0; i < M; ++i) slot_to_key[i] = N;
-            for (std::size_t i = 0; i < N; ++i) {
-                std::size_t slot = compute(keys[i]);
-                if (slot_to_key[slot] != N) return false;
-                slot_to_key[slot] = i;
-            }
-            std::size_t filled = 0;
-            for (std::size_t i = 0; i < M; ++i) {
-                if (slot_to_key[i] != N) ++filled;
-            }
-            if (filled != N) return false;
-            return true;
-        }
+        if (!found) return false;
+        determined[sp][sc] = true;
     }
 
-    return false;
+    // Phase 5: Build slot_to_key from final hash values.
+    for (std::size_t i = 0; i < M; ++i) slot_to_key[i] = N;
+    for (std::size_t i = 0; i < N; ++i) {
+        std::size_t slot = phash[i] % M;
+        if (slot_to_key[slot] != N) return false;
+        slot_to_key[slot] = i;
+    }
+    std::size_t filled = 0;
+    for (std::size_t i = 0; i < M; ++i)
+        if (slot_to_key[i] != N) ++filled;
+    return filled == N;
 }
 
 // Throwing wrapper around try_generate_gperf.
@@ -518,6 +569,21 @@ consteval phf_result<N> compute_phf_po2(
     } else {
         throw "Failed to find a valid power-of-2 table size for perfect hash";
     }
+}
+
+// Try gperf with power-of-2 sizes up to MaxM.  Returns true on success.
+template <std::size_t N, std::size_t M, std::size_t MaxM>
+consteval bool try_gperf_po2(
+    const std::array<std::string_view, N>& keys,
+    phf_result<N>& result)
+{
+    if (try_compute_phf<N, M>(keys, result))
+        return true;
+    constexpr std::size_t NextM = M * 2;
+    if constexpr (NextM <= MaxM) {
+        return try_gperf_po2<N, NextM, MaxM>(keys, result);
+    }
+    return false;
 }
 
 // Bucket hash for Hash-and-Displace: combines first char, last char, and length.
@@ -745,18 +811,25 @@ consteval phf_result<N> compute_phf_hd_po2(
 }
 
 // Compute PHF for the given keys.
-// Uses Hash-and-Displace for N > 8 (fast consteval), gperf-style for N <= 8
-// (produces tighter tables for small sets).
+// Strategy: try the partition-based gperf algorithm first (produces smaller,
+// faster hash functions), capped at table size 128 to stay within uint8_t.
+// Falls back to Hash-and-Displace for large N or if gperf cannot find a
+// solution at the available table sizes.
 template <std::size_t N>
 consteval phf_result<N> compute_phf(const std::array<std::string_view, N>& keys) {
     constexpr std::size_t StartM = next_power_of_2(N);
-    // With per-position asso_values, gperf's collision resolver has much
-    // less collateral damage per bump, so it scales to larger key sets.
-    if constexpr (N <= 20) {
-        return compute_phf_po2<N, StartM>(keys);
-    } else {
-        return compute_phf_hd_po2<N, StartM>(keys);
+    // The runtime perfect_hash_set uses uint8_t for asso_values and
+    // slot_to_key, so TableSize must be <= 255.  Cap gperf attempts at 128
+    // (the largest power of 2 that fits).
+    constexpr std::size_t GPERF_MAX_TABLE =
+        phf_result<N>::MAX_TABLE_SIZE < 128 ? phf_result<N>::MAX_TABLE_SIZE : 128;
+    if constexpr (StartM <= GPERF_MAX_TABLE) {
+        phf_result<N> result{};
+        if (try_gperf_po2<N, StartM, GPERF_MAX_TABLE>(keys, result))
+            return result;
     }
+    // Fall back to Hash-and-Displace.
+    return compute_phf_hd_po2<N, StartM>(keys);
 }
 
 } // namespace ConstexprCore::detail

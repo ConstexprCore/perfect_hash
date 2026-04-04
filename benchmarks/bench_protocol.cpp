@@ -1131,8 +1131,8 @@ int main(int argc, char *argv[]) {
       std::println("  --help, -h         Show this help message\n");
       std::println("Filter tokens (mix and match):");
       std::println("  Workloads: hits, misses, mixed");
-      std::println("  Methods:   make_perfect_map, naive, unordered_map, ankerl, absl, frozen, kronuz, gperf");
-      std::println("  Keysets:   protocol, stock, keyword, header, mime, letters, headers50\n");
+      std::println("  Methods:   make_perfect_map, naive, unordered_map, ankerl, absl, frozen, kronuz, gperf, pthash");
+      std::println("  Keysets:   protocol, stock, keyword, header, mime, letters, headers50, jsreserved\n");
       std::println("Omitting a category runs all values for that category.\n");
       std::println("Examples:");
       std::println("  {} --filter hits,make_perfect_map,protocol", argv[0]);
