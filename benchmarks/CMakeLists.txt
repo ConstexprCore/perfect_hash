@@ -36,18 +36,27 @@ FetchContent_Declare(
 )
 FetchContent_Populate(constexpr_phf)
 
+FetchContent_Declare(
+    pthash
+    GIT_REPOSITORY https://github.com/jermp/pthash.git
+    GIT_TAG master
+)
+FetchContent_MakeAvailable(pthash)
+
 add_executable(bench_protocol
     bench_protocol.cpp
 )
 
 target_include_directories(bench_protocol PRIVATE
     ${constexpr_phf_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/gperf
 )
 
 target_link_libraries(bench_protocol PRIVATE
     ConstexprCore::perfect_hash
     counters::counters
     unordered_dense::unordered_dense
+    PTHASH
     absl::flat_hash_map
     frozen::frozen
 )

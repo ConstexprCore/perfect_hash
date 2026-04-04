@@ -30,12 +30,13 @@
 #include <frozen/string.h>
 #include "phf.hh"
 #include "hashes.hh"
+#include <pthash.hpp>
 
 // ============================================================================
 // Filter support: --filter hits,make_perfect_map,protocol
 //   Workloads: hits, misses, mixed
-//   Methods:   make_perfect_map, naive, unordered_map, ankerl, absl, frozen, kronuz, gperf
-//   Keysets:   protocol, stock, keyword, header, mime
+//   Methods:   make_perfect_map, naive, unordered_map, ankerl, absl, frozen, kronuz, gperf, pthash
+//   Keysets:   protocol, stock, keyword, header, mime, jsreserved
 // Omitting a category means "run all" for that category.
 // ============================================================================
 
@@ -58,8 +59,8 @@ struct BenchFilter {
 BenchFilter parse_filter(const std::string &arg) {
   BenchFilter f;
   static const std::set<std::string> valid_workloads = {"hits", "misses", "mixed"};
-  static const std::set<std::string> valid_methods = {"make_perfect_map", "naive", "unordered_map", "ankerl", "absl", "frozen", "kronuz", "gperf"};
-  static const std::set<std::string> valid_keysets = {"protocol", "stock", "keyword", "header", "mime", "letters", "headers50"};
+  static const std::set<std::string> valid_methods = {"make_perfect_map", "naive", "unordered_map", "ankerl", "absl", "frozen", "kronuz", "gperf", "pthash"};
+  static const std::set<std::string> valid_keysets = {"protocol", "stock", "keyword", "header", "mime", "letters", "headers50", "jsreserved"};
 
   size_t start = 0;
   while (start < arg.size()) {
@@ -98,6 +99,9 @@ namespace gperf_letters {
 }
 namespace gperf_headers50 {
 #include "http_headers50_gperf.inc"
+}
+namespace gperf_jsreserved {
+#include "jsreserved_gperf.inc"
 }
 
 // ============================================================================
@@ -148,7 +152,7 @@ std::vector<std::string_view> build_input(
 }
 
 // Generic benchmark: runs PHF, naive, and unordered_map on a given input vector.
-template <typename PHFMap, typename NaiveFn, typename FrozenMap, typename KronuzPHF, typename GperfFn>
+template <typename PHFMap, typename NaiveFn, typename FrozenMap, typename KronuzPHF, typename GperfFn, typename PthashMap>
 void bench_workload(const std::string &label,
                     std::vector<std::string_view> &input,
                     size_t num_strings,
@@ -158,6 +162,7 @@ void bench_workload(const std::string &label,
                     const FrozenMap &frozen_map,
                     const KronuzPHF &kronuz_phf,
                     GperfFn gperf_fn,
+                    const PthashMap &pthash_map,
                     const BenchFilter &filter,
                     bool describe) {
   std::vector<int> results(num_strings, 0);
@@ -291,6 +296,21 @@ void bench_workload(const std::string &label,
                  shuffle_bench(gperf_bench, shuffle));
     volatile auto sum = std::accumulate(results.begin(), results.end(), 0); // prevent optimization
   }
+
+  // pthash (perfect hash function)
+  if (filter.run_method("pthash")) {
+    gen.seed(42);
+    auto pthash_bench = [&]() {
+      for (size_t i = 0; i < input.size(); i++) {
+        std::string key(input[i]);
+        auto pos = pthash_map(key);
+        if (pos < pthash_map.num_keys()) results[i] = static_cast<int>(pos);
+      }
+    };
+    pretty_print(label + " pthash", num_strings,
+                 shuffle_bench(pthash_bench, shuffle));
+    volatile auto sum = std::accumulate(results.begin(), results.end(), 0); // prevent optimization
+  }
 }
 
 // Run a full key-set benchmark with all three workload modes.
@@ -318,6 +338,20 @@ void run_keyset(const std::string &name,
   for (size_t i = 0; i < hit_keys.size(); i++)
     uset[hit_keys[i]] = static_cast<int>(i);
 
+  // Build pthash
+  std::vector<std::string> keyset(hit_keys.begin(), hit_keys.end());
+  using pthash_type = pthash::single_phf<pthash::xxhash_128, pthash::skew_bucketer, pthash::dictionary, true>;
+  pthash_type pthash_phf;
+  pthash::build_configuration config;
+  config.seed = 1234567890;
+  config.lambda = 4;
+  config.alpha = 0.95;
+  config.verbose = false;
+  config.avg_partition_size = 1000;
+  config.num_threads = 1;
+  config.dense_partitioning = false;
+  pthash_phf.build_in_internal_memory(keyset.begin(), keyset.size(), config);
+
   // Build workload vectors
   auto hits   = build_input(hit_keys, num_strings, 42);
   auto misses = build_input(miss_keys, num_strings, 42);
@@ -330,15 +364,15 @@ void run_keyset(const std::string &name,
 
   if (filter.run_workload("hits")) {
     std::println("  --- all hits ---");
-    bench_workload("hits  ", hits, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, gperf_fn, filter, describe);
+    bench_workload("hits  ", hits, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, gperf_fn, pthash_phf, filter, describe);
   }
   if (filter.run_workload("misses")) {
     std::println("  --- all misses ---");
-    bench_workload("misses", misses, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, gperf_fn, filter, describe);
+    bench_workload("misses", misses, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, gperf_fn, pthash_phf, filter, describe);
   }
   if (filter.run_workload("mixed")) {
     std::println("  --- mixed (50/50) ---");
-    bench_workload("mixed ", mixed, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, gperf_fn, filter, describe);
+    bench_workload("mixed ", mixed, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, gperf_fn, pthash_phf, filter, describe);
   }
 }
 
@@ -366,6 +400,8 @@ static constexpr auto protocol_kronuz = [] {
   fnv1ah32 h{};
   return phf::make_phf({h("http"), h("https"), h("ftp"), h("ws"), h("wss"), h("file")});
 }();
+
+
 
 std::optional<int> protocol_naive(std::string_view s) {
   if (s == "http") return 0;
@@ -465,6 +501,8 @@ static constexpr auto ticker_kronuz = [] {
   });
 }();
 
+
+
 // Left here intentionally for dissambly inspection of the generated code.
 std::optional<int> ticker_fancy(std::string_view s) {
   return ticker_phf.lookup(s);
@@ -525,6 +563,8 @@ static constexpr auto keyword_kronuz = [] {
     h("for"), h("goto"), h("if")
   });
 }();
+
+
 
 std::optional<int> keyword_naive(std::string_view s) {
   if (s == "auto") return 0;   if (s == "bool") return 1;
@@ -590,6 +630,8 @@ static constexpr auto header_kronuz = [] {
   });
 }();
 
+
+
 std::optional<int> header_naive(std::string_view s) {
   if (s == "Accept") return 0;          if (s == "Accept-Encoding") return 1;
   if (s == "Authorization") return 2;   if (s == "Cache-Control") return 3;
@@ -651,6 +693,8 @@ static constexpr auto mime_kronuz = [] {
   });
 }();
 
+
+
 std::optional<int> mime_naive(std::string_view s) {
   if (s == "text/html") return 0;         if (s == "text/plain") return 1;
   if (s == "text/css") return 2;           if (s == "application/json") return 3;
@@ -698,6 +742,8 @@ static constexpr auto letters_kronuz = [] {
     h("u"),h("v"),h("w"),h("x"),h("y"),h("z")
   });
 }();
+
+
 
 std::optional<int> letters_naive(std::string_view s) {
   if (s == "a") return 0;  if (s == "b") return 1;
@@ -808,6 +854,8 @@ static constexpr auto headers50_kronuz = [] {
   });
 }();
 
+
+
 std::optional<int> headers50_naive(std::string_view s) {
   if (s == "Accept") return 0;           if (s == "Accept-Charset") return 1;
   if (s == "Accept-Encoding") return 2;  if (s == "Accept-Language") return 3;
@@ -836,6 +884,132 @@ std::optional<int> headers50_naive(std::string_view s) {
   if (s == "Warning") return 48;         if (s == "X-Forwarded-For") return 49;
   return std::nullopt;
 }
+
+// ============================================================================
+// Key set 8: JavaScript Reserved Words (45 keys, medium length)
+// ============================================================================
+
+static constexpr auto jsreserved_phf =
+    ConstexprCore::make_perfect_map<
+        ConstexprCore::kv<"await", 0>,
+        ConstexprCore::kv<"break", 1>,
+        ConstexprCore::kv<"case", 2>,
+        ConstexprCore::kv<"catch", 3>,
+        ConstexprCore::kv<"class", 4>,
+        ConstexprCore::kv<"const", 5>,
+        ConstexprCore::kv<"continue", 6>,
+        ConstexprCore::kv<"debugger", 7>,
+        ConstexprCore::kv<"default", 8>,
+        ConstexprCore::kv<"delete", 9>,
+        ConstexprCore::kv<"do", 10>,
+        ConstexprCore::kv<"else", 11>,
+        ConstexprCore::kv<"enum", 12>,
+        ConstexprCore::kv<"export", 13>,
+        ConstexprCore::kv<"extends", 14>,
+        ConstexprCore::kv<"false", 15>,
+        ConstexprCore::kv<"finally", 16>,
+        ConstexprCore::kv<"for", 17>,
+        ConstexprCore::kv<"function", 18>,
+        ConstexprCore::kv<"if", 19>,
+        ConstexprCore::kv<"import", 20>,
+        ConstexprCore::kv<"in", 21>,
+        ConstexprCore::kv<"instanceof", 22>,
+        ConstexprCore::kv<"new", 23>,
+        ConstexprCore::kv<"null", 24>,
+        ConstexprCore::kv<"return", 25>,
+        ConstexprCore::kv<"super", 26>,
+        ConstexprCore::kv<"switch", 27>,
+        ConstexprCore::kv<"this", 28>,
+        ConstexprCore::kv<"throw", 29>,
+        ConstexprCore::kv<"true", 30>,
+        ConstexprCore::kv<"try", 31>,
+        ConstexprCore::kv<"typeof", 32>,
+        ConstexprCore::kv<"var", 33>,
+        ConstexprCore::kv<"void", 34>,
+        ConstexprCore::kv<"while", 35>,
+        ConstexprCore::kv<"with", 36>,
+        ConstexprCore::kv<"yield", 37>,
+        ConstexprCore::kv<"implements", 38>,
+        ConstexprCore::kv<"interface", 39>,
+        ConstexprCore::kv<"package", 40>,
+        ConstexprCore::kv<"private", 41>,
+        ConstexprCore::kv<"protected", 42>,
+        ConstexprCore::kv<"public", 43>,
+        ConstexprCore::kv<"static", 44>>();
+
+static constexpr frozen::unordered_map<frozen::string, int, 45> jsreserved_frozen = {
+    {"await", 0}, {"break", 1}, {"case", 2}, {"catch", 3}, {"class", 4},
+    {"const", 5}, {"continue", 6}, {"debugger", 7}, {"default", 8}, {"delete", 9},
+    {"do", 10}, {"else", 11}, {"enum", 12}, {"export", 13}, {"extends", 14},
+    {"false", 15}, {"finally", 16}, {"for", 17}, {"function", 18}, {"if", 19},
+    {"import", 20}, {"in", 21}, {"instanceof", 22}, {"new", 23}, {"null", 24},
+    {"return", 25}, {"super", 26}, {"switch", 27}, {"this", 28}, {"throw", 29},
+    {"true", 30}, {"try", 31}, {"typeof", 32}, {"var", 33}, {"void", 34},
+    {"while", 35}, {"with", 36}, {"yield", 37}, {"implements", 38}, {"interface", 39},
+    {"package", 40}, {"private", 41}, {"protected", 42}, {"public", 43}, {"static", 44}
+};
+
+static constexpr auto jsreserved_kronuz = [] {
+  fnv1ah32 h{};
+  return phf::make_phf({
+      h("await"), h("break"), h("case"), h("catch"), h("class"),
+      h("const"), h("continue"), h("debugger"), h("default"), h("delete"),
+      h("do"), h("else"), h("enum"), h("export"), h("extends"),
+      h("false"), h("finally"), h("for"), h("function"), h("if"),
+      h("import"), h("in"), h("instanceof"), h("new"), h("null"),
+      h("return"), h("super"), h("switch"), h("this"), h("throw"),
+      h("true"), h("try"), h("typeof"), h("var"), h("void"),
+      h("while"), h("with"), h("yield"), h("implements"), h("interface"),
+      h("package"), h("private"), h("protected"), h("public"), h("static")
+  });
+}();
+
+std::optional<int> jsreserved_naive(std::string_view s) {
+  if (s == "await") return 0;     if (s == "break") return 1;
+  if (s == "case") return 2;      if (s == "catch") return 3;
+  if (s == "class") return 4;     if (s == "const") return 5;
+  if (s == "continue") return 6;  if (s == "debugger") return 7;
+  if (s == "default") return 8;   if (s == "delete") return 9;
+  if (s == "do") return 10;       if (s == "else") return 11;
+  if (s == "enum") return 12;     if (s == "export") return 13;
+  if (s == "extends") return 14;  if (s == "false") return 15;
+  if (s == "finally") return 16;  if (s == "for") return 17;
+  if (s == "function") return 18; if (s == "if") return 19;
+  if (s == "import") return 20;   if (s == "in") return 21;
+  if (s == "instanceof") return 22; if (s == "new") return 23;
+  if (s == "null") return 24;     if (s == "return") return 25;
+  if (s == "super") return 26;    if (s == "switch") return 27;
+  if (s == "this") return 28;     if (s == "throw") return 29;
+  if (s == "true") return 30;     if (s == "try") return 31;
+  if (s == "typeof") return 32;   if (s == "var") return 33;
+  if (s == "void") return 34;     if (s == "while") return 35;
+  if (s == "with") return 36;     if (s == "yield") return 37;
+  if (s == "implements") return 38; if (s == "interface") return 39;
+  if (s == "package") return 40;  if (s == "private") return 41;
+  if (s == "protected") return 42; if (s == "public") return 43;
+  if (s == "static") return 44;
+  return std::nullopt;
+}
+
+auto gperf_jsreserved_fn = [](std::string_view s) -> std::optional<int> {
+  auto result = gperf_jsreserved::JsReservedGperf::lookup(s.data(), s.size());
+  if (result) {
+    static const std::unordered_map<std::string_view, int> map = {
+      {"await", 0}, {"break", 1}, {"case", 2}, {"catch", 3}, {"class", 4},
+      {"const", 5}, {"continue", 6}, {"debugger", 7}, {"default", 8}, {"delete", 9},
+      {"do", 10}, {"else", 11}, {"enum", 12}, {"export", 13}, {"extends", 14},
+      {"false", 15}, {"finally", 16}, {"for", 17}, {"function", 18}, {"if", 19},
+      {"import", 20}, {"in", 21}, {"instanceof", 22}, {"new", 23}, {"null", 24},
+      {"return", 25}, {"super", 26}, {"switch", 27}, {"this", 28}, {"throw", 29},
+      {"true", 30}, {"try", 31}, {"typeof", 32}, {"var", 33}, {"void", 34},
+      {"while", 35}, {"with", 36}, {"yield", 37}, {"implements", 38}, {"interface", 39},
+      {"package", 40}, {"private", 41}, {"protected", 42}, {"public", 43}, {"static", 44}
+    };
+    auto it = map.find(result);
+    if (it != map.end()) return it->second;
+  }
+  return std::nullopt;
+};
 
 // ============================================================================
 // Verification
@@ -925,6 +1099,8 @@ bool verify_keyset(const std::string &name,
       if (gperf_result)
         fail(std::format("gperf: false positive for miss key '{}'", key));
     }
+
+
   }
 
   std::println("  {} {}", ok ? "OK" : "FAIL", name);
@@ -1065,6 +1241,14 @@ int main(int argc, char *argv[]) {
       {"X-Request-Id","Forwarded","Alt-Svc","DNT","Upgrade-Insecure-Requests",
        "X-Frame-Options","Content-Security-Policy","Strict-Transport-Security",
        "Access-Control-Allow-Origin","Content-MD5"});
+    all_ok &= verify_keyset("JavaScript Reserved Words", jsreserved_phf, jsreserved_naive, jsreserved_frozen, jsreserved_kronuz, gperf_jsreserved_fn,
+      {"await","break","case","catch","class","const","continue","debugger","default","delete",
+       "do","else","enum","export","extends","false","finally","for","function","if",
+       "import","in","instanceof","new","null","return","super","switch","this","throw",
+       "true","try","typeof","var","void","while","with","yield","implements","interface",
+       "package","private","protected","public","static"},
+      {"let","console","alert","document","window","Array","Object","String","Number","Boolean",
+       "undefined","NaN","Infinity","Math","Date","RegExp","JSON","Promise","async","arguments"});
     return all_ok ? 0 : 1;
   }
 
@@ -1159,6 +1343,19 @@ int main(int argc, char *argv[]) {
       {"X-Request-Id","Forwarded","Alt-Svc","DNT","Upgrade-Insecure-Requests",
        "X-Frame-Options","Content-Security-Policy","Strict-Transport-Security",
        "Access-Control-Allow-Origin","Content-MD5"},
+      filter, describe);
+  }
+
+  // --- JavaScript Reserved Words (45 keys, medium) ---
+  if (filter.run_keyset("jsreserved")) {
+    run_keyset("JavaScript Reserved Words", jsreserved_phf, jsreserved_naive, jsreserved_frozen, jsreserved_kronuz, gperf_jsreserved_fn,
+      {"await","break","case","catch","class","const","continue","debugger","default","delete",
+       "do","else","enum","export","extends","false","finally","for","function","if",
+       "import","in","instanceof","new","null","return","super","switch","this","throw",
+       "true","try","typeof","var","void","while","with","yield","implements","interface",
+       "package","private","protected","public","static"},
+      {"let","console","alert","document","window","Array","Object","String","Number","Boolean",
+       "undefined","NaN","Infinity","Math","Date","RegExp","JSON","Promise","async","arguments"},
       filter, describe);
   }
 }
