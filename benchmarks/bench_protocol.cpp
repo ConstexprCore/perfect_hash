@@ -30,7 +30,7 @@
 #include <frozen/string.h>
 #include "phf.hh"
 #include "hashes.hh"
-#include <pthash.hpp>
+#include "pthash_wrapper.h"
 
 // ============================================================================
 // Filter support: --filter hits,make_perfect_map,protocol
@@ -152,7 +152,7 @@ std::vector<std::string_view> build_input(
 }
 
 // Generic benchmark: runs PHF, naive, and unordered_map on a given input vector.
-template <typename PHFMap, typename NaiveFn, typename FrozenMap, typename KronuzPHF, typename GperfFn, typename PthashMap>
+template <typename PHFMap, typename NaiveFn, typename FrozenMap, typename KronuzPHF, typename GperfFn>
 void bench_workload(const std::string &label,
                     std::vector<std::string_view> &input,
                     size_t num_strings,
@@ -162,7 +162,6 @@ void bench_workload(const std::string &label,
                     const FrozenMap &frozen_map,
                     const KronuzPHF &kronuz_phf,
                     GperfFn gperf_fn,
-                    const PthashMap &pthash_map,
                     const BenchFilter &filter,
                     bool describe) {
   std::vector<int> results(num_strings, 0);
@@ -296,21 +295,31 @@ void bench_workload(const std::string &label,
                  shuffle_bench(gperf_bench, shuffle));
     volatile auto sum = std::accumulate(results.begin(), results.end(), 0); // prevent optimization
   }
+}
 
-  // pthash (perfect hash function)
-  if (filter.run_method("pthash")) {
-    gen.seed(42);
-    auto pthash_bench = [&]() {
-      for (size_t i = 0; i < input.size(); i++) {
-        std::string key(input[i]);
-        auto pos = pthash_map(key);
-        if (pos < pthash_map.num_keys()) results[i] = static_cast<int>(pos);
-      }
-    };
-    pretty_print(label + " pthash", num_strings,
-                 shuffle_bench(pthash_bench, shuffle));
-    volatile auto sum = std::accumulate(results.begin(), results.end(), 0); // prevent optimization
-  }
+// Separate non-template function for pthash to avoid polluting bench_workload's codegen.
+void bench_pthash(const std::string &label,
+                  std::vector<std::string_view> &input,
+                  size_t num_strings,
+                  const PthashWrapper &pthash_map,
+                  const BenchFilter &filter) {
+  if (!filter.run_method("pthash")) return;
+  std::vector<int> results(num_strings, 0);
+  std::mt19937_64 gen(42);
+  auto shuffle = [&]() {
+    std::shuffle(input.begin(), input.end(), gen);
+  };
+  gen.seed(42);
+  auto pthash_bench = [&]() {
+    for (size_t i = 0; i < input.size(); i++) {
+      std::string key(input[i]);
+      auto pos = pthash_map(key);
+      if (pos < pthash_map.num_keys()) results[i] = static_cast<int>(pos);
+    }
+  };
+  pretty_print(label + " pthash", num_strings,
+               shuffle_bench(pthash_bench, shuffle));
+  volatile auto sum = std::accumulate(results.begin(), results.end(), 0); // prevent optimization
 }
 
 // Run a full key-set benchmark with all three workload modes.
@@ -338,19 +347,9 @@ void run_keyset(const std::string &name,
   for (size_t i = 0; i < hit_keys.size(); i++)
     uset[hit_keys[i]] = static_cast<int>(i);
 
-  // Build pthash
-  std::vector<std::string> keyset(hit_keys.begin(), hit_keys.end());
-  using pthash_type = pthash::single_phf<pthash::xxhash_128, pthash::skew_bucketer, pthash::dictionary, true>;
-  pthash_type pthash_phf;
-  pthash::build_configuration config;
-  config.seed = 1234567890;
-  config.lambda = 4;
-  config.alpha = 0.95;
-  config.verbose = false;
-  config.avg_partition_size = 1000;
-  config.num_threads = 1;
-  config.dense_partitioning = false;
-  pthash_phf.build_in_internal_memory(keyset.begin(), keyset.size(), config);
+  // Build pthash (isolated in separate TU to avoid code layout interference)
+  PthashWrapper pthash_phf;
+  pthash_phf.build(hit_keys);
 
   // Build workload vectors
   auto hits   = build_input(hit_keys, num_strings, 42);
@@ -364,15 +363,18 @@ void run_keyset(const std::string &name,
 
   if (filter.run_workload("hits")) {
     std::println("  --- all hits ---");
-    bench_workload("hits  ", hits, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, gperf_fn, pthash_phf, filter, describe);
+    bench_workload("hits  ", hits, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, gperf_fn, filter, describe);
+    bench_pthash("hits  ", hits, num_strings, pthash_phf, filter);
   }
   if (filter.run_workload("misses")) {
     std::println("  --- all misses ---");
-    bench_workload("misses", misses, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, gperf_fn, pthash_phf, filter, describe);
+    bench_workload("misses", misses, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, gperf_fn, filter, describe);
+    bench_pthash("misses", misses, num_strings, pthash_phf, filter);
   }
   if (filter.run_workload("mixed")) {
     std::println("  --- mixed (50/50) ---");
-    bench_workload("mixed ", mixed, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, gperf_fn, pthash_phf, filter, describe);
+    bench_workload("mixed ", mixed, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, gperf_fn, filter, describe);
+    bench_pthash("mixed ", mixed, num_strings, pthash_phf, filter);
   }
 }
 
