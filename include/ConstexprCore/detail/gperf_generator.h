@@ -528,24 +528,41 @@ constexpr std::size_t hd_bucket_hash(std::string_view key) {
     return (c0 + c1 * 3 + key.size() * 17) & 0xFF;
 }
 
-// Per-key hash for Hash-and-Displace: polynomial of first 4 bytes + length.
+// Per-key hash for Hash-and-Displace: polynomial of first N bytes + length.
+// Two variants: 2-byte (lighter, fewer instructions) and 4-byte (stronger mixing).
+// The generator tries 2-byte first; if it can't find a valid PHF, falls back to 4-byte.
 // Must match between generator (consteval) and runtime (compute_hash).
-constexpr std::size_t hd_key_hash(std::string_view key) {
-    // Branchless: always hash exactly 4 bytes, using 0 for out-of-range positions.
-    // At consteval this is just a loop; at runtime the compiler can unroll without
-    // length-dependent branches.
-    auto safe_char = [](const char* p, std::size_t len, std::size_t idx) -> std::size_t {
-        std::size_t has = static_cast<std::size_t>(idx < len);
-        std::size_t si = idx & -has;
-        return static_cast<unsigned char>(p[si]) & -has;
-    };
+
+constexpr std::size_t hd_safe_char(const char* p, std::size_t len, std::size_t idx) {
+    std::size_t has = static_cast<std::size_t>(idx < len);
+    std::size_t si = idx & -has;
+    return static_cast<unsigned char>(p[si]) & -has;
+}
+
+constexpr std::size_t hd_key_hash_2(std::string_view key) {
     std::size_t kc = key.size();
-    kc = kc * 31 + static_cast<unsigned char>(key[0]); // byte 0 always valid (len >= 1)
-    kc = kc * 31 + safe_char(key.data(), key.size(), 1);
-    kc = kc * 31 + safe_char(key.data(), key.size(), 2);
-    kc = kc * 31 + safe_char(key.data(), key.size(), 3);
+    kc = kc * 31 + static_cast<unsigned char>(key[0]);
+    kc = kc * 31 + hd_safe_char(key.data(), key.size(), 1);
     return kc;
 }
+
+constexpr std::size_t hd_key_hash_4(std::string_view key) {
+    std::size_t kc = key.size();
+    kc = kc * 31 + static_cast<unsigned char>(key[0]);
+    kc = kc * 31 + hd_safe_char(key.data(), key.size(), 1);
+    kc = kc * 31 + hd_safe_char(key.data(), key.size(), 2);
+    kc = kc * 31 + hd_safe_char(key.data(), key.size(), 3);
+    return kc;
+}
+
+// Legacy name for backward compatibility (4-byte variant).
+constexpr std::size_t hd_key_hash(std::string_view key) { return hd_key_hash_4(key); }
+
+// HD_HASH_2BYTE flag: stored in positions_[2] by the generator when the
+// 2-byte key hash was sufficient. Runtime compute_hash checks this to
+// select the lighter hash variant.
+static constexpr std::size_t HD_HASH_2BYTE_FLAG = 2;
+static constexpr std::size_t HD_HASH_4BYTE_FLAG = 4;
 
 
 // ============================================================================
@@ -605,9 +622,7 @@ consteval bool try_hash_and_displace(
 
     // Set num_positions = 0xFF to signal H&D mode to compute_hash.
     // Store the actual positions in positions[0] and positions[1].
-    // compute_hash will detect num_positions == 0xFF and use:
-    //   bucket = (char_at(key, pos[0]) + char_at(key, pos[1]) + key.size()) & 0xFF
-    //   slot = asso_values[bucket] % M
+    // positions[2] stores the key hash variant flag (2-byte or 4-byte).
     num_positions = 0xFF; // sentinel for H&D mode
     positions[0] = pos0;
     positions[1] = pos1;
@@ -639,63 +654,61 @@ consteval bool try_hash_and_displace(
         }
     }
 
-    // Initialize slots
-    for (std::size_t i = 0; i < M; ++i) slot_to_key[i] = N;
-    for (std::size_t i = 0; i < 256; ++i) asso_values[0][i] = 0;
+    // Helper: try H&D placement with a given key hash function.
+    auto try_placement = [&](auto key_hash_fn) -> bool {
+        for (std::size_t i = 0; i < M; ++i) slot_to_key[i] = N;
+        for (std::size_t i = 0; i < 256; ++i) asso_values[0][i] = 0;
 
-    // For each bucket (largest first), find a displacement value d such that
-    // (base_hash[key] + d) % M lands all keys on empty slots.
-    for (std::size_t b = 0; b < num_buckets; ++b) {
-        std::size_t ch = buckets[b].ch;
+        for (std::size_t b = 0; b < num_buckets; ++b) {
+            std::size_t ch = buckets[b].ch;
+            std::array<std::size_t, N> bucket_keys{};
+            std::size_t bk_count = 0;
+            for (std::size_t i = 0; i < N; ++i)
+                if (key_bucket[i] == ch) bucket_keys[bk_count++] = i;
 
-        // Collect key indices in this bucket
-        std::array<std::size_t, N> bucket_keys{};
-        std::size_t bk_count = 0;
-        for (std::size_t i = 0; i < N; ++i) {
-            if (key_bucket[i] == ch) bucket_keys[bk_count++] = i;
-        }
-
-        // Try displacement values d = 0, 1, ..., M*2-1.
-        // H&D hash: slot = (d + key.size()*31 + key[0]) % M
-        // The per-key contribution (key.size()*31 + key[0]) ensures keys
-        // in the same bucket get different base offsets.
-        bool placed = false;
-
-        // Displacement range: d is stored in asso_values as uint8_t, so d < 255.
-        // Also, d >= M produces duplicate slots (d + kc) % M == (d%M + kc) % M,
-        // so cap at min(M, 255) to avoid redundant iterations.
-        std::size_t max_d = M < 255 ? M : 255;
-        for (std::size_t d = 0; d < max_d; ++d) {
-            bool ok = true;
-            std::array<std::size_t, N> bucket_slots{};
-            for (std::size_t k = 0; k < bk_count; ++k) {
-                std::size_t slot = (d + hd_key_hash(keys[bucket_keys[k]])) % M;
-                if (slot_to_key[slot] != N) { ok = false; break; }
-                for (std::size_t k2 = 0; k2 < k; ++k2) {
-                    if (bucket_slots[k2] == slot) { ok = false; break; }
-                }
-                if (!ok) break;
-                bucket_slots[k] = slot;
-            }
-
-            if (ok) {
-                asso_values[0][ch] = d;
+            bool placed = false;
+            std::size_t max_d = M < 255 ? M : 255;
+            for (std::size_t d = 0; d < max_d; ++d) {
+                bool ok = true;
+                std::array<std::size_t, N> bucket_slots{};
                 for (std::size_t k = 0; k < bk_count; ++k) {
-                    slot_to_key[bucket_slots[k]] = bucket_keys[k];
+                    std::size_t slot = (d + key_hash_fn(keys[bucket_keys[k]])) % M;
+                    if (slot_to_key[slot] != N) { ok = false; break; }
+                    for (std::size_t k2 = 0; k2 < k; ++k2) {
+                        if (bucket_slots[k2] == slot) { ok = false; break; }
+                    }
+                    if (!ok) break;
+                    bucket_slots[k] = slot;
                 }
-                placed = true;
-                break;
+                if (ok) {
+                    asso_values[0][ch] = d;
+                    for (std::size_t k = 0; k < bk_count; ++k)
+                        slot_to_key[bucket_slots[k]] = bucket_keys[k];
+                    placed = true;
+                    break;
+                }
             }
+            if (!placed) return false;
         }
+        std::size_t filled = 0;
+        for (std::size_t i = 0; i < M; ++i)
+            if (slot_to_key[i] != N) ++filled;
+        return filled == N;
+    };
 
-        if (!placed) return false; // Could not place this bucket
+    // Try 2-byte key hash first (lighter runtime: 2 rounds instead of 4).
+    if (try_placement([](std::string_view k) { return hd_key_hash_2(k); })) {
+        positions[2] = HD_HASH_2BYTE_FLAG;
+        return true;
     }
 
-    // Verify all N keys are placed
-    std::size_t filled = 0;
-    for (std::size_t i = 0; i < M; ++i)
-        if (slot_to_key[i] != N) ++filled;
-    return filled == N;
+    // Fall back to 4-byte key hash (stronger mixing).
+    if (try_placement([](std::string_view k) { return hd_key_hash_4(k); })) {
+        positions[2] = HD_HASH_4BYTE_FLAG;
+        return true;
+    }
+
+    return false;
 }
 
 // Try Hash-and-Displace for a specific table size M.
