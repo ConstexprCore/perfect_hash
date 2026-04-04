@@ -36,18 +36,42 @@ FetchContent_Declare(
 )
 FetchContent_Populate(constexpr_phf)
 
+FetchContent_Declare(
+    pthash
+    GIT_REPOSITORY https://github.com/jermp/pthash.git
+    GIT_TAG master
+)
+FetchContent_Populate(pthash)
+
+# Create our own target to avoid pthash's INTERFACE compile options
+# (e.g. -march=native, -ggdb, -Wall) from propagating to our targets.
+find_package(Threads REQUIRED)
+add_library(pthash_headers INTERFACE)
+target_include_directories(pthash_headers SYSTEM INTERFACE
+    ${pthash_SOURCE_DIR}/include
+    ${pthash_SOURCE_DIR}/external/mm_file/include
+    ${pthash_SOURCE_DIR}/external/xxHash
+    ${pthash_SOURCE_DIR}/external/bits/include
+    ${pthash_SOURCE_DIR}/external/bits/external/essentials/include
+)
+target_compile_features(pthash_headers INTERFACE cxx_std_17)
+target_link_libraries(pthash_headers INTERFACE Threads::Threads)
+
 add_executable(bench_protocol
     bench_protocol.cpp
+    pthash_wrapper.cpp
 )
 
 target_include_directories(bench_protocol PRIVATE
     ${constexpr_phf_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/gperf
 )
 
 target_link_libraries(bench_protocol PRIVATE
     ConstexprCore::perfect_hash
     counters::counters
     unordered_dense::unordered_dense
+    pthash_headers
     absl::flat_hash_map
     frozen::frozen
 )
