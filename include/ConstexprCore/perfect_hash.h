@@ -447,8 +447,13 @@ struct perfect_hash_set {
 
     [[nodiscard]] constexpr constexprcore_really_inline std::size_t compute_hash(std::string_view key) const noexcept {
         if (num_positions_ == HD_MODE) {
-            // H&D mode: uses shared hd_bucket_hash + hd_key_hash from generator.
-            std::size_t h = asso_values_[0][detail::hd_bucket_hash(key)] + detail::hd_key_hash(key);
+            // H&D mode: bucket hash + key hash. positions_[2] selects the key hash variant.
+            // The 2-byte variant saves ~10 insn by skipping 2 safe_char rounds.
+            std::size_t bucket = detail::hd_bucket_hash(key);
+            std::size_t kh = (positions_[2] == detail::HD_HASH_2BYTE_FLAG)
+                ? detail::hd_key_hash_2(key)
+                : detail::hd_key_hash_4(key);
+            std::size_t h = asso_values_[0][bucket] + kh;
             if constexpr (TABLE_SIZE_IS_POW2)
                 return h & (TableSize - 1);
             else
