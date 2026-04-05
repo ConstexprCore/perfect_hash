@@ -401,8 +401,35 @@ consteval bool try_generate_gperf(
         phash[k] = keys[k].size();
 
     // Equivalence class machinery: signatures and sorted order.
+    //
+    // We maintain sig[k] = XOR over all *undetermined* symbols (p, kchars[k][p])
+    // of a per-symbol salt value.  When a symbol (sp, sc) is marked determined
+    // we XOR salt[sp][sc] out of the signature of every matching key — this is
+    // O(matching keys) instead of recomputing all N signatures from scratch
+    // with a num_positions-wide inner loop (the previous hot path blew the
+    // constexpr ops limit for N ~ 100).
+    std::array<std::array<std::size_t, 256>, MAX_POSITIONS> salt{};
+    {
+        std::size_t s = 0x9e3779b97f4a7c15ULL;
+        for (std::size_t p = 0; p < num_positions; ++p) {
+            for (std::size_t c = 0; c < 256; ++c) {
+                s = s * 6364136223846793005ULL + 1442695040888963407ULL;
+                salt[p][c] = s;
+            }
+        }
+    }
+
     std::array<std::size_t, N> sig{};
+    for (std::size_t k = 0; k < N; ++k) {
+        std::size_t s = 0;
+        for (std::size_t p = 0; p < num_positions; ++p) {
+            std::size_t c = kchars[k][p];
+            if (c < 256) s ^= salt[p][c];
+        }
+        sig[k] = s;
+    }
     std::array<std::size_t, N> order{};
+    for (std::size_t k = 0; k < N; ++k) order[k] = k;
 
     // Collision detection via generation counter (avoids clearing a size-M
     // array for every equivalence class check).
@@ -417,26 +444,30 @@ consteval bool try_generate_gperf(
         std::size_t sp = syms[si].pos;
         std::size_t sc = syms[si].ch;
 
-        // Compute equivalence class signatures.  Two keywords are equivalent
-        // if they have the same set of undetermined (pos, char) pairs after
-        // marking (sp, sc) as determined.  We hash the undetermined set.
+        // Mark (sp, sc) as determined *for signature purposes*: XOR its salt
+        // out of the signature of every key whose char at position sp is sc.
+        // After this step, sig[k] reflects the set of undetermined symbols
+        // minus (sp, sc), which is exactly what the equivalence-class
+        // invariant requires for the current iteration.
+        std::size_t sp_salt = salt[sp][sc];
         for (std::size_t k = 0; k < N; ++k) {
-            std::size_t s = 0;
-            for (std::size_t p = 0; p < num_positions; ++p) {
-                std::size_t c = kchars[k][p];
-                if (c < 256 && !determined[p][c] && !(p == sp && c == sc))
-                    s = s * 997 + (p * 257 + c + 1);
-            }
-            sig[k] = s;
-            order[k] = k;
+            if (kchars[k][sp] == sc) sig[k] ^= sp_salt;
         }
 
-        // Sort keyword indices by signature to group equivalence classes.
-        for (std::size_t i = 0; i < N; ++i)
-            for (std::size_t j = i + 1; j < N; ++j)
-                if (sig[order[j]] < sig[order[i]]) {
-                    auto tmp = order[i]; order[i] = order[j]; order[j] = tmp;
-                }
+        // Sort order[] by sig[] using insertion sort.  We keep order[] sorted
+        // between iterations; since only a handful of signatures change per
+        // iteration, insertion sort runs in ~O(N) on this near-sorted input
+        // (vs. the O(N^2) bubble sort that blew the constexpr ops limit).
+        for (std::size_t i = 1; i < N; ++i) {
+            std::size_t x = order[i];
+            std::size_t xs = sig[x];
+            std::size_t j = i;
+            while (j > 0 && sig[order[j - 1]] > xs) {
+                order[j] = order[j - 1];
+                --j;
+            }
+            order[j] = x;
+        }
 
         // Try values for asso_values[sp][sc].
         bool found = false;
@@ -763,10 +794,10 @@ consteval bool try_hash_and_displace(
     };
 
     // Try 2-byte key hash first (lighter runtime: 2 rounds instead of 4).
-    if (try_placement([](std::string_view k) { return hd_key_hash_2(k); })) {
-        positions[2] = HD_HASH_2BYTE_FLAG;
-        return true;
-    }
+    //if (try_placement([](std::string_view k) { return hd_key_hash_2(k); })) {
+    //    positions[2] = HD_HASH_2BYTE_FLAG;
+    //    return true;
+    //}
 
     // Fall back to 4-byte key hash (stronger mixing).
     if (try_placement([](std::string_view k) { return hd_key_hash_4(k); })) {
