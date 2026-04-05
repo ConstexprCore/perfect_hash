@@ -538,11 +538,14 @@ struct perfect_hash_set {
             // then always-same for pure-hit or pure-miss workloads.
             if (min_key_len_ > 0) {
                 std::size_t len = key.size();
-                // Safe byte load: use key[0] only when len > 0 (cmov).
+                // Safe byte load (cmov): avoids dereferencing data() for empty views.
                 unsigned char byte = (len > 0) ? static_cast<unsigned char>(key.data()[0]) : 0;
                 std::uint8_t idx = direct_lookup_[byte];
-                // Force idx to 0xFF when len != 1. Bitwise form so gcc emits
-                // a branchless mask, not a jcc.
+                // Force idx to 0xFF sentinel when len != 1. Bitwise OR-mask
+                // form (not ternary): gcc reverts a ternary here back into a
+                // branch because len varies on mixed-length miss streams,
+                // reintroducing the ~25% mispredict. The explicit `-(bool)`
+                // mask compiles to `cmp; setne; neg; or` (branchless).
                 std::uint8_t mismatch_mask = static_cast<std::uint8_t>(-static_cast<std::int8_t>(len != 1));
                 idx |= mismatch_mask;
                 if (idx == 0xFF) return std::nullopt;
