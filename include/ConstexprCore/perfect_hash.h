@@ -438,7 +438,7 @@ struct perfect_hash_set {
         if (min_key_len_ > 0 && key.empty()) return false;
         auto len = key.size();
         // Clamp len to MaxKeyLen so compare_key_ never reads past MaxKeyLen bytes.
-        // Out-of-range lengths will fail the len_ok check below.
+        // Out-of-range lengths will fail the len check below.
         auto clamped_len = len <= MaxKeyLen ? len : MaxKeyLen;
         std::size_t slot = compute_hash(key);
         bool len_ok = (slot_key_len_[slot] == len);
@@ -518,9 +518,11 @@ struct perfect_hash_set {
         auto len = key.size();
         auto clamped_len = len <= MaxKeyLen ? len : MaxKeyLen;
         std::size_t slot = compute_hash(key);
-        bool len_ok = (slot_key_len_[slot] == len);
-        bool key_ok = compare_key_(key.data(), clamped_len, slot);
-        return (len_ok & key_ok) ? std::optional<std::size_t>{slot} : std::nullopt;
+        // Short-circuit ordering matters. Compare keys first to avoid
+        // mispredictions on misses.
+        if (!compare_key_(key.data(), clamped_len, slot)) return std::nullopt;
+        if (slot_key_len_[slot] != len) return std::nullopt;
+        return std::optional<std::size_t>{slot};
     }
 
     [[nodiscard]] constexpr constexprcore_really_inline std::optional<std::size_t> index_of(std::string_view key) const noexcept {
@@ -536,10 +538,10 @@ struct perfect_hash_set {
         auto len = key.size();
         auto clamped_len = len <= MaxKeyLen ? len : MaxKeyLen;
         std::size_t slot = compute_hash(key);
-        bool len_ok = (slot_key_len_[slot] == len);
-        bool key_ok = compare_key_(key.data(), clamped_len, slot);
-        auto is_ok = len_ok & key_ok;
-        return is_ok ? std::optional<std::size_t>{slot_to_key_[slot]} : std::nullopt;
+        // See slot_match() for short-circuit ordering rationale.
+        if (!compare_key_(key.data(), clamped_len, slot)) return std::nullopt;
+        if (slot_key_len_[slot] != len) return std::nullopt;
+        return std::optional<std::size_t>{slot_to_key_[slot]};
     }
 };
 
