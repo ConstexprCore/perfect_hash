@@ -6,6 +6,7 @@
 #include <array>
 #include <stdexcept>
 #include <string_view>
+#include <string>
 #include <optional>
 #include <tuple>
 #include <cstddef>
@@ -459,17 +460,31 @@ struct perfect_hash_set {
             else
                 return h % TableSize;
         }
-        // Standard gperf mode
+        // Standard gperf mode — branchless per-position hash contribution.
+        // When the position is out of range for the current key (e.g. pos=3 on a
+        // 2-char key, or LAST_CHAR on an empty key) the contribution must be
+        // zero. We compute a valid in-bounds byte index unconditionally, load
+        // the byte, look up asso_values_, and then mask the result to 0 when
+        // the position was out of range. This keeps the loop body a straight
+        // sequence of cselects / ANDs with no data-dependent branches, which
+        // matters when gperf selects interior positions on variable-length key
+        // sets (e.g. S&P 100 tickers: lengths 1..4, positions include 2 and 3).
         std::size_t h = key.size();
+        const char* kp = key.data();
+        const std::size_t klen = key.size();
         for (std::uint8_t i = 0; i < num_positions_; ++i) {
             std::uint8_t pos = positions_[i];
-            std::size_t ch;
-            if (pos == POS_LAST_CHAR) {
-                ch = key.empty() ? 256 : static_cast<unsigned char>(key.back());
-            } else {
-                ch = (pos < key.size()) ? static_cast<unsigned char>(key[pos]) : 256;
-            }
-            if (ch < 256) h += asso_values_[i][ch];
+            // Unified index: for POS_LAST_CHAR, use klen-1 (wraps to SIZE_MAX
+            // when klen==0, which makes `has` below false — that case is
+            // handled by the mask). Otherwise use pos itself.
+            std::size_t idx = (pos == POS_LAST_CHAR)
+                ? (klen - std::size_t{1})
+                : static_cast<std::size_t>(pos);
+            std::size_t has = static_cast<std::size_t>(idx < klen);
+            std::size_t safe_idx = idx & -has;
+            std::size_t byte_val = static_cast<unsigned char>(kp[safe_idx]);
+            // Add asso_values_[i][byte_val] when in-range, otherwise add 0.
+            h += static_cast<std::size_t>(asso_values_[i][byte_val]) & -has;
         }
         if constexpr (TABLE_SIZE_IS_POW2)
             return h & (TableSize - 1);
