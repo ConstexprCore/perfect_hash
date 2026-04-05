@@ -856,17 +856,18 @@ consteval phf_result<N> compute_phf_hd_po2(
 
 // Compute PHF for the given keys.
 // Strategy: try the partition-based gperf algorithm first (produces smaller,
-// faster hash functions), capped at table size 128 to stay within uint8_t.
+// faster hash functions), capped at table size 256 to stay within uint8_t.
 // Falls back to Hash-and-Displace for large N or if gperf cannot find a
 // solution at the available table sizes.
 template <std::size_t N>
 consteval phf_result<N> compute_phf(const std::array<std::string_view, N>& keys) {
     constexpr std::size_t StartM = next_power_of_2(N);
-    // The runtime perfect_hash_set uses uint8_t for asso_values and
-    // slot_to_key, so TableSize must be <= 255.  Cap gperf attempts at 128
-    // (the largest power of 2 that fits).
+    // The runtime perfect_hash_set uses uint8_t for asso_values (reduced
+    // mod TableSize, so 0..TableSize-1 fits whenever TableSize <= 256) and
+    // slot_to_key entries are key indices (< N <= 255).  Cap gperf attempts
+    // at 256 (the largest power of 2 that fits).
     constexpr std::size_t GPERF_MAX_TABLE =
-        phf_result<N>::MAX_TABLE_SIZE < 128 ? phf_result<N>::MAX_TABLE_SIZE : 128;
+        phf_result<N>::MAX_TABLE_SIZE < 256 ? phf_result<N>::MAX_TABLE_SIZE : 256;
     if constexpr (StartM <= GPERF_MAX_TABLE) {
         phf_result<N> result{};
         if (try_gperf_po2<N, StartM, GPERF_MAX_TABLE>(keys, result))

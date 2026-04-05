@@ -32,7 +32,7 @@ namespace ConstexprCore {
 template <std::size_t N, std::size_t TableSize = N, std::size_t MaxKeyLen = 64>
 struct perfect_hash_set {
     static_assert(N <= 255, "N must be <= 255 for uint8_t key indices");
-    static_assert(TableSize <= 255, "TableSize must be <= 255 for uint8_t asso_values");
+    static_assert(TableSize <= 256, "TableSize must be <= 256 (uint8_t slot array length)");
     static_assert(MaxKeyLen >= 1 && MaxKeyLen < 255,
                   "MaxKeyLen must be in [1, 254] to reserve 0xFF as empty sentinel");
     static_assert(detail::MAX_POSITIONS <= 255, "MAX_POSITIONS must fit in uint8_t");
