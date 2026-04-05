@@ -6,6 +6,7 @@
 #include <array>
 #include <stdexcept>
 #include <string_view>
+#include <string>
 #include <optional>
 #include <tuple>
 #include <cstddef>
@@ -32,7 +33,7 @@ namespace ConstexprCore {
 template <std::size_t N, std::size_t TableSize = N, std::size_t MaxKeyLen = 64>
 struct perfect_hash_set {
     static_assert(N <= 255, "N must be <= 255 for uint8_t key indices");
-    static_assert(TableSize <= 255, "TableSize must be <= 255 for uint8_t asso_values");
+    static_assert(TableSize <= 256, "TableSize must be <= 256 (uint8_t slot array length)");
     static_assert(MaxKeyLen >= 1 && MaxKeyLen < 255,
                   "MaxKeyLen must be in [1, 254] to reserve 0xFF as empty sentinel");
     static_assert(detail::MAX_POSITIONS <= 255, "MAX_POSITIONS must fit in uint8_t");
@@ -437,7 +438,7 @@ struct perfect_hash_set {
         if (min_key_len_ > 0 && key.empty()) return false;
         auto len = key.size();
         // Clamp len to MaxKeyLen so compare_key_ never reads past MaxKeyLen bytes.
-        // Out-of-range lengths will fail the len_ok check below.
+        // Out-of-range lengths will fail the len check below.
         auto clamped_len = len <= MaxKeyLen ? len : MaxKeyLen;
         std::size_t slot = compute_hash(key);
         bool len_ok = (slot_key_len_[slot] == len);
@@ -459,17 +460,49 @@ struct perfect_hash_set {
             else
                 return h % TableSize;
         }
-        // Standard gperf mode
+        // Two hash forms, selected by N:
+        //
+        // - Small N (< 64): branchy form. gcc emits `cmp klen, k; je` for
+        //   each out-of-range position, and the branch predictor (TAGE)
+        //   fully learns the shuffled key sequence, so 0 mispredicts.
+        //   Fewer instructions than the branchless form.
+        //
+        // - Large N (>= 64): branchless mask form (`& -has`). TAGE capacity
+        //   is exhausted on larger shuffled streams, so the per-length
+        //   branches mispredict (e.g. stock/S&P100 sees ~21% miss rate on
+        //   the length-2 branch, costing ~3 cycles per lookup). The mask
+        //   form is ~6 insn larger but eliminates all mispredicts. We use
+        //   `& -has` rather than ternary `?:` because gcc folds the ternary
+        //   back into a jcc whenever the gated work includes a load.
+        //
+        // The threshold (64) is empirical on the S&P100 (100 keys, shows
+        // mispredicts) vs jsreserved (45 keys, does not) vs headers50
+        // (50 keys, does not) benchmarks under gcc on x86-64.
         std::size_t h = key.size();
-        for (std::uint8_t i = 0; i < num_positions_; ++i) {
-            std::uint8_t pos = positions_[i];
-            std::size_t ch;
-            if (pos == POS_LAST_CHAR) {
-                ch = key.empty() ? 256 : static_cast<unsigned char>(key.back());
-            } else {
-                ch = (pos < key.size()) ? static_cast<unsigned char>(key[pos]) : 256;
+        if constexpr (N >= 64) {
+            const char* kp = key.data();
+            const std::size_t klen = key.size();
+            for (std::uint8_t i = 0; i < num_positions_; ++i) {
+                std::uint8_t pos = positions_[i];
+                std::size_t idx = (pos == POS_LAST_CHAR)
+                    ? (klen - std::size_t{1})
+                    : static_cast<std::size_t>(pos);
+                std::size_t has = static_cast<std::size_t>(idx < klen);
+                std::size_t safe_idx = idx & -has;
+                unsigned char byte_val = static_cast<unsigned char>(kp[safe_idx]);
+                h += static_cast<std::size_t>(asso_values_[i][byte_val]) & -has;
             }
-            if (ch < 256) h += asso_values_[i][ch];
+        } else {
+            for (std::uint8_t i = 0; i < num_positions_; ++i) {
+                std::uint8_t pos = positions_[i];
+                std::size_t ch;
+                if (pos == POS_LAST_CHAR) {
+                    ch = key.empty() ? 256 : static_cast<unsigned char>(key.back());
+                } else {
+                    ch = (pos < key.size()) ? static_cast<unsigned char>(key[pos]) : 256;
+                }
+                if (ch < 256) h += asso_values_[i][ch];
+            }
         }
         if constexpr (TABLE_SIZE_IS_POW2)
             return h & (TableSize - 1);
@@ -485,13 +518,38 @@ struct perfect_hash_set {
         auto len = key.size();
         auto clamped_len = len <= MaxKeyLen ? len : MaxKeyLen;
         std::size_t slot = compute_hash(key);
-        bool len_ok = (slot_key_len_[slot] == len);
-        bool key_ok = compare_key_(key.data(), clamped_len, slot);
-        return (len_ok & key_ok) ? std::optional<std::size_t>{slot} : std::nullopt;
+        // Short-circuit ordering matters. Compare keys first to avoid
+        // mispredictions on misses.
+        if (!compare_key_(key.data(), clamped_len, slot)) return std::nullopt;
+        if (slot_key_len_[slot] != len) return std::nullopt;
+        return std::optional<std::size_t>{slot};
     }
 
     [[nodiscard]] constexpr constexprcore_really_inline std::optional<std::size_t> index_of(std::string_view key) const noexcept {
         if constexpr (MaxKeyLen == 1) {
+            // Branchless fast path when "" is not in the set (the common case).
+            // The natural form `if (key.size() == 1) ...; if (key.size() > 1)
+            // return nullopt;` has a size-check branch that mispredicts when
+            // miss streams mix single-char and multi-char keys (Letters a-z
+            // sees ~25% miss rate with its 15/5 single/multi-char miss set).
+            // The branchless form loads direct_lookup_ unconditionally using
+            // a safe byte, then forces the idx to the 0xFF sentinel when the
+            // key length is not 1. A single final branch on `idx == 0xFF` is
+            // then always-same for pure-hit or pure-miss workloads.
+            if (min_key_len_ > 0) {
+                std::size_t len = key.size();
+                // Safe byte load: use key[0] only when len > 0 (cmov).
+                unsigned char byte = (len > 0) ? static_cast<unsigned char>(key.data()[0]) : 0;
+                std::uint8_t idx = direct_lookup_[byte];
+                // Force idx to 0xFF when len != 1. Bitwise form so gcc emits
+                // a branchless mask, not a jcc.
+                std::uint8_t mismatch_mask = static_cast<std::uint8_t>(-static_cast<std::int8_t>(len != 1));
+                idx |= mismatch_mask;
+                if (idx == 0xFF) return std::nullopt;
+                return std::optional<std::size_t>{idx};
+            }
+            // Slow path: "" is in the set, fall through to general path to
+            // handle the empty-key case.
             if (key.size() == 1) {
                 auto idx = direct_lookup_[static_cast<unsigned char>(key[0])];
                 return idx != 0xFF ? std::optional<std::size_t>{idx} : std::nullopt;
@@ -503,10 +561,10 @@ struct perfect_hash_set {
         auto len = key.size();
         auto clamped_len = len <= MaxKeyLen ? len : MaxKeyLen;
         std::size_t slot = compute_hash(key);
-        bool len_ok = (slot_key_len_[slot] == len);
-        bool key_ok = compare_key_(key.data(), clamped_len, slot);
-        auto is_ok = len_ok & key_ok;
-        return is_ok ? std::optional<std::size_t>{slot_to_key_[slot]} : std::nullopt;
+        // See slot_match() for short-circuit ordering rationale.
+        if (!compare_key_(key.data(), clamped_len, slot)) return std::nullopt;
+        if (slot_key_len_[slot] != len) return std::nullopt;
+        return std::optional<std::size_t>{slot_to_key_[slot]};
     }
 };
 
