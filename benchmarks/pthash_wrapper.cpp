@@ -32,3 +32,14 @@ uint64_t PthashWrapper::operator()(const std::string &key) const {
 uint64_t PthashWrapper::num_keys() const {
   return impl_->phf.num_keys();
 }
+
+void PthashWrapper::bench_lookup(const std::vector<std::string_view> &input,
+                                 std::vector<int> &results) const {
+  const auto &phf = impl_->phf;
+  const uint64_t n = phf.num_keys();
+  for (size_t i = 0; i < input.size(); i++) {
+    std::string key(input[i]);
+    auto pos = phf(key);
+    if (pos < n) results[i] = static_cast<int>(pos);
+  }
+}

@@ -311,11 +311,7 @@ void bench_pthash(const std::string &label,
   };
   gen.seed(42);
   auto pthash_bench = [&]() {
-    for (size_t i = 0; i < input.size(); i++) {
-      std::string key(input[i]);
-      auto pos = pthash_map(key);
-      if (pos < pthash_map.num_keys()) results[i] = static_cast<int>(pos);
-    }
+    pthash_map.bench_lookup(input, results);
   };
   pretty_print(label + " pthash", num_strings,
                shuffle_bench(pthash_bench, shuffle));
