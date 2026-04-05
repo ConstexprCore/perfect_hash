@@ -527,6 +527,29 @@ struct perfect_hash_set {
 
     [[nodiscard]] constexpr constexprcore_really_inline std::optional<std::size_t> index_of(std::string_view key) const noexcept {
         if constexpr (MaxKeyLen == 1) {
+            // Branchless fast path when "" is not in the set (the common case).
+            // The natural form `if (key.size() == 1) ...; if (key.size() > 1)
+            // return nullopt;` has a size-check branch that mispredicts when
+            // miss streams mix single-char and multi-char keys (Letters a-z
+            // sees ~25% miss rate with its 15/5 single/multi-char miss set).
+            // The branchless form loads direct_lookup_ unconditionally using
+            // a safe byte, then forces the idx to the 0xFF sentinel when the
+            // key length is not 1. A single final branch on `idx == 0xFF` is
+            // then always-same for pure-hit or pure-miss workloads.
+            if (min_key_len_ > 0) {
+                std::size_t len = key.size();
+                // Safe byte load: use key[0] only when len > 0 (cmov).
+                unsigned char byte = (len > 0) ? static_cast<unsigned char>(key.data()[0]) : 0;
+                std::uint8_t idx = direct_lookup_[byte];
+                // Force idx to 0xFF when len != 1. Bitwise form so gcc emits
+                // a branchless mask, not a jcc.
+                std::uint8_t mismatch_mask = static_cast<std::uint8_t>(-static_cast<std::int8_t>(len != 1));
+                idx |= mismatch_mask;
+                if (idx == 0xFF) return std::nullopt;
+                return std::optional<std::size_t>{idx};
+            }
+            // Slow path: "" is in the set, fall through to general path to
+            // handle the empty-key case.
             if (key.size() == 1) {
                 auto idx = direct_lookup_[static_cast<unsigned char>(key[0])];
                 return idx != 0xFF ? std::optional<std::size_t>{idx} : std::nullopt;
