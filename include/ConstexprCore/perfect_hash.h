@@ -22,6 +22,14 @@
 #include <ConstexprCore/detail/neon_compare.h>
 #include <ConstexprCore/detail/sse2_compare.h>
 
+#ifndef CONSTEXPRCORE_USE_NEON_FOR_32_BYTE_COMPARE
+#if defined(__clang__) && CONSTEXPRCORE_HAS_NEON
+#define CONSTEXPRCORE_USE_NEON_FOR_32_BYTE_COMPARE 1
+#else
+#define CONSTEXPRCORE_USE_NEON_FOR_32_BYTE_COMPARE 0
+#endif
+#endif
+
 
 
 namespace ConstexprCore {
