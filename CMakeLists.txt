@@ -48,6 +48,11 @@ target_link_libraries(perfect_hash INTERFACE
     ConstexprCore::useful_abstractions
 )
 
+# Enable NEON/SSE2 two-pass comparison for MaxKeyLen 17-32 on supported platforms.
+target_compile_definitions(perfect_hash INTERFACE
+    $<$<BOOL:$<PLATFORM_ID:Darwin>>:CONSTEXPRCORE_USE_NEON_FOR_32_BYTE_COMPARE=1>
+)
+
 # Tests
 option(PH_BUILD_TESTS "Build tests" ON)
 if(PH_BUILD_TESTS)
