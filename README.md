@@ -27,8 +27,8 @@ Using an Apple M4 processor, with the URL protocol keys (`http`, `https`, `ftp`,
 
 | Method                    | billion queries/s  |
 |---------------------------|-------|
-| make_perfect_map (gperf)  | 1.08  |
-| gperf                     | 0.23  |
+| **ours**  | 1.08  |
+| gperf  (command line)     | 0.23  |
 | kronuz::phf               | 0.22  |
 | frozen::unordered_map     | 0.16  |
 | absl::flat_hash_map       | 0.14  |
