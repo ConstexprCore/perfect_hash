@@ -19,6 +19,11 @@ public:
   uint64_t operator()(const std::string &key) const;
   uint64_t num_keys() const;
 
+  // Runs the hot lookup loop internally so pthash calls can be inlined
+  // within this translation unit.
+  void bench_lookup(const std::vector<std::string_view> &input,
+                    std::vector<int> &results) const;
+
 private:
   struct Impl;
   std::unique_ptr<Impl> impl_;

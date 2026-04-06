@@ -311,11 +311,7 @@ void bench_pthash(const std::string &label,
   };
   gen.seed(42);
   auto pthash_bench = [&]() {
-    for (size_t i = 0; i < input.size(); i++) {
-      std::string key(input[i]);
-      auto pos = pthash_map(key);
-      if (pos < pthash_map.num_keys()) results[i] = static_cast<int>(pos);
-    }
+    pthash_map.bench_lookup(input, results);
   };
   pretty_print(label + " pthash", num_strings,
                shuffle_bench(pthash_bench, shuffle));
@@ -1131,8 +1127,8 @@ int main(int argc, char *argv[]) {
       std::println("  --help, -h         Show this help message\n");
       std::println("Filter tokens (mix and match):");
       std::println("  Workloads: hits, misses, mixed");
-      std::println("  Methods:   make_perfect_map, naive, unordered_map, ankerl, absl, frozen, kronuz, gperf");
-      std::println("  Keysets:   protocol, stock, keyword, header, mime, letters, headers50\n");
+      std::println("  Methods:   make_perfect_map, naive, unordered_map, ankerl, absl, frozen, kronuz, gperf, pthash");
+      std::println("  Keysets:   protocol, stock, keyword, header, mime, letters, headers50, jsreserved\n");
       std::println("Omitting a category runs all values for that category.\n");
       std::println("Examples:");
       std::println("  {} --filter hits,make_perfect_map,protocol", argv[0]);
