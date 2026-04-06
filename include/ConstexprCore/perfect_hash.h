@@ -11,6 +11,7 @@
 #include <tuple>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #ifndef constexprcore_really_inline
 #if defined(_MSC_VER) && !defined(__clang__)
 #define constexprcore_really_inline __forceinline
@@ -257,6 +258,17 @@ struct perfect_hash_set {
         return byte_val & -static_cast<std::uint64_t>(has_it);
     }
 
+    // Portable copy helper: constexpr-friendly byte loop, std::memcpy at runtime.
+    static constexpr void copy_bytes_(void* dst, const void* src, std::size_t n) noexcept {
+        if consteval {
+            auto* d = static_cast<unsigned char*>(dst);
+            const auto* s = static_cast<const unsigned char*>(src);
+            for (std::size_t i = 0; i < n; ++i) d[i] = s[i];
+        } else {
+            std::memcpy(dst, src, n);
+        }
+    }
+
     // Pack up to 8 key bytes into a uint64, zero-padded. Branchless.
     // Uses if-constexpr on MaxKeyLen to emit only the needed byte loads.
     [[nodiscard]] static constexpr std::uint64_t pack_input_(
@@ -312,8 +324,8 @@ struct perfect_hash_set {
                 std::uint64_t encoded;
                 if (len >= 2) {
                     std::uint16_t lo, hi;
-                    __builtin_memcpy(&lo, p, 2);
-                    __builtin_memcpy(&hi, p + len - 2, 2);
+                    copy_bytes_(&lo, p, 2);
+                    copy_bytes_(&hi, p + len - 2, 2);
                     encoded = lo | (static_cast<std::uint64_t>(hi) << 16)
                         | (static_cast<std::uint64_t>(len) << 32);
                 } else {
@@ -349,7 +361,7 @@ struct perfect_hash_set {
                     input_val = pack_input_(p, len);
                 } else {
                     if (min_key_len_ >= 8) {
-                        __builtin_memcpy(&input_val, p, 8);
+                        copy_bytes_(&input_val, p, 8);
                     } else {
                         input_val = pack_input_(p, len);
                     }
@@ -381,7 +393,7 @@ struct perfect_hash_set {
                     input_val = pack_input_(p, len);
                 } else {
                     if (min_key_len_ >= 8) {
-                        __builtin_memcpy(&input_val, p, 8);
+                        copy_bytes_(&input_val, p, 8);
                     } else {
                         input_val = pack_input_(p, len);
                     }
@@ -405,7 +417,7 @@ struct perfect_hash_set {
                     input_val = pack_input_(p, len);
                 } else {
                     if (min_key_len_ >= 8) {
-                        __builtin_memcpy(&input_val, p, 8);
+                        copy_bytes_(&input_val, p, 8);
                     } else {
                         input_val = pack_input_(p, len);
                     }
