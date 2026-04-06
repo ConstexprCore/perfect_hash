@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   build:
@@ -35,6 +36,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # ── HTTPS credentials for private dependency: ConstexprCore/useful_abstractions ─
+      - name: Configure git credentials
+        run: git config --global url."https://x-access-token:${{ secrets.USEFUL_ABSTRACTIONS_PAT }}@github.com/".insteadOf "https://github.com/"
 
       # ── Linux: ensure requested compiler version is installed ─────────────
       - name: Install compiler (Linux)
