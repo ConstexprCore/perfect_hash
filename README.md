@@ -1,4 +1,5 @@
 # Billion-query-per-second lookup tables in C++ 
+[![CI](https://github.com/ConstexprCore/perfect_hash/actions/workflows/ci.yml/badge.svg)](https://github.com/ConstexprCore/perfect_hash/actions/workflows/ci.yml)
 
 
 
