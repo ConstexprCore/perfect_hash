@@ -25,7 +25,7 @@ We use an association-value algorithm computed entirely in `consteval` context, 
 
 Using an Apple M4 processor, with the URL protocol keys (`http`, `https`, `ftp`, `ws`, `wss`, `file`), we classify them as over 1 billion keys per second. It is four times faster than our closest competitor and ten times faster than the standard `std::unordered_map`.
 
-| Method                    | GV/s  |
+| Method                    | billion queries/s  |
 |---------------------------|-------|
 | make_perfect_map (gperf)  | 1.08  |
 | gperf                     | 0.23  |
