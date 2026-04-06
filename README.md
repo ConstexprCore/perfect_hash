@@ -96,6 +96,177 @@ cmake -B build
 cmake --build build
 ```
 
+### Single-header bundle
+
+If Python 3 is available when you run CMake configure, the build exposes a
+target that bundles the library into a single distributable header.
+
+Generate it with:
+
+```bash
+cmake -S . -B build
+cmake --build build --target perfect_hash_singleheader
+```
+
+The generated file is:
+
+```text
+build/singleheader/perfect_hash.h
+```
+
+You can then ship that file directly and include it as:
+
+```cpp
+#include "perfect_hash.h"
+```
+
+The single header contains, in order:
+
+- `fixed_string.h`
+- `detail/gperf_generator.h`
+- `detail/neon_compare.h`
+- `detail/sse2_compare.h`
+- `perfect_hash.h`
+
+During bundling, the corresponding internal `#include <ConstexprCore/...>` lines
+inside `perfect_hash.h` are commented out so the generated file is self-contained.
+
+If the `perfect_hash_singleheader` target does not exist, re-run configure after
+installing Python 3 so CMake can detect it:
+
+```bash
+cmake -S . -B build
+cmake --build build --target perfect_hash_singleheader
+```
+
+A smoke test for the generated header is also included in the test suite and can
+be run with:
+
+```bash
+ctest --test-dir build --output-on-failure -R phf_singleheader_smoke
+```
+
+### Precompiled headers (PCH) for faster compiles
+
+Calling `make_constexpr_perfect_map` on large sets of keys can require relatively long compile time (more than milliseconds). The solution is to use precompiled headers.
+
+If you are experimenting with a heavy header like `fun.h`, a precompiled header
+can significantly reduce incremental compile time for `fun.cpp`.
+
+For example, use the following as your `fun.h` header, it contains the call to `make_perfect_map`.
+
+```cpp
+#pragma once
+#include "perfect_hash.h"
+
+#include <optional>
+
+enum class HttpMethod {
+    get,
+    post,
+    put,
+    patch,
+    head,
+    options_,
+    trace,
+    connect,
+    propfind,
+    proppatch,
+    mkcol,
+    copy,
+    move,
+    lock,
+    unlock,
+    report,
+    mkactivity,
+    checkout,
+    merge,
+    msearch,
+    notify,
+    subscribe,
+    unsubscribe,
+    purge,
+    link,
+    unlink
+};
+
+constexpr auto methods = ConstexprCore::make_perfect_map<
+    ConstexprCore::kv<"GET", HttpMethod::get>,
+    ConstexprCore::kv<"POST", HttpMethod::post>,
+    ConstexprCore::kv<"PUT", HttpMethod::put>,
+    ConstexprCore::kv<"PATCH", HttpMethod::patch>,
+    ConstexprCore::kv<"HEAD", HttpMethod::head>,
+    ConstexprCore::kv<"OPTIONS", HttpMethod::options_>,
+    ConstexprCore::kv<"TRACE", HttpMethod::trace>,
+    ConstexprCore::kv<"CONNECT", HttpMethod::connect>,
+    ConstexprCore::kv<"PROPFIND", HttpMethod::propfind>,
+    ConstexprCore::kv<"PROPPATCH", HttpMethod::proppatch>,
+    ConstexprCore::kv<"MKCOL", HttpMethod::mkcol>,
+    ConstexprCore::kv<"COPY", HttpMethod::copy>,
+    ConstexprCore::kv<"MOVE", HttpMethod::move>,
+    ConstexprCore::kv<"LOCK", HttpMethod::lock>,
+    ConstexprCore::kv<"UNLOCK", HttpMethod::unlock>,
+    ConstexprCore::kv<"REPORT", HttpMethod::report>,
+    ConstexprCore::kv<"MKACTIVITY", HttpMethod::mkactivity>,
+    ConstexprCore::kv<"CHECKOUT", HttpMethod::checkout>,
+    ConstexprCore::kv<"MERGE", HttpMethod::merge>,
+    ConstexprCore::kv<"MSEARCH", HttpMethod::msearch>,
+    ConstexprCore::kv<"NOTIFY", HttpMethod::notify>,
+    ConstexprCore::kv<"SUBSCRIBE", HttpMethod::subscribe>,
+    ConstexprCore::kv<"UNSUBSCRIBE", HttpMethod::unsubscribe>,
+    ConstexprCore::kv<"PURGE", HttpMethod::purge>,
+    ConstexprCore::kv<"LINK", HttpMethod::link>,
+    ConstexprCore::kv<"UNLINK", HttpMethod::unlink>
+>();
+```
+
+and `fun.cpp` might be as follows.
+
+
+```cpp
+#include "fun.h"
+int main() {
+    auto post = methods.lookup("POST");
+    if (!post || *post != HttpMethod::post) {
+        return 1;
+    }
+    if (methods.contains("DELETE")) {
+        return 1;
+    }
+    return 0;
+}
+```
+
+As long as you do not change the header, the map will remained precomputed and your compile
+times will be fast.
+
+Using GCC from the command line:
+
+```bash
+g++ -std=c++23 -O2 -x c++-header fun.h -o fun.h.gch
+g++ -std=c++23 -O2 fun.cpp -o fun
+```
+
+
+With CMake, the equivalent is `target_precompile_headers`:
+
+```cmake
+add_executable(fun_demo fun.cpp)
+target_precompile_headers(fun_demo PRIVATE
+        "${CMAKE_CURRENT_SOURCE_DIR}/fun.h"
+)
+target_compile_features(fun_demo PRIVATE cxx_std_23)
+```
+
+Then build as usual:
+
+```bash
+cmake -S . -B build
+cmake --build build --target fun_demo
+```
+
+This lets CMake manage the compiler-specific PCH details automatically.
+
 ### Tests
 
 Tests are built by default (`PH_BUILD_TESTS=ON`):
@@ -109,34 +280,43 @@ ctest --test-dir build --output-on-failure
 ```bash
 cmake -B build -DPH_BUILD_BENCHMARKS=ON
 cmake --build build
-./build/benchmarks/phf_bench
+./build/benchmarks/bench_protocol
+```
+
+Run a filtered subset with `--filter`:
+
+```bash
+./build/benchmarks/bench_protocol --filter hits,make_perfect_map,protocol
+./build/benchmarks/bench_protocol --filter hits,misses,stock
+./build/benchmarks/bench_protocol --verify
 ```
 
 #### Benchmark design
 
-The benchmark suite compares multiple lookup strategies across key sets of increasing size:
+The benchmark suite compares multiple lookup strategies across key sets of varying size and key length:
 
-| Key set | N | Notes |
-|---|---|---|
-| Booleans | 2 | Tiny set |
-| RGB colors | 3 | Small set |
-| Protocols | 5 | Short prefixes |
-| HTTP methods | 7 | Typical use case |
-| C++ keywords | 15 | Medium set |
-| Letters a-z | 26 | All same length — stresses asso_values |
-| HTTP headers | 50 | Realistic large set |
+| Key set | Filter token | N | MaxKeyLen | Notes |
+|---|---|---|---|---|
+| URL Protocols | `protocol` | 6 | 5 | Short keys, small set |
+| S&P 100 Tickers | `stock` | 100 | 5 | 100 short keys — H&D algorithm |
+| C++ Keywords | `keyword` | 15 | 6 | Medium-sized set |
+| HTTP Headers | `header` | 20 | 17 | Long keys — H&D algorithm |
+| MIME Types | `mime` | 15 | 24 | Long keys, slashes |
+| Letters a-z | `letters` | 26 | 1 | All same length — direct lookup fast path |
+| HTTP Headers 50 | `headers50` | 50 | 19 | Realistic large header set |
+| JavaScript Reserved Words | `jsreserved` | 45 | 10 | Medium keys, dense set |
 
 Each key set is tested with three query mixes (positive-only, negative-only, 50/50 mixed) against:
 
-- **PHF** — this library's `perfect_hash_set::contains()`
-- **gperf** — GNU `gperf`-generated lookup (where applicable)
-- **`std::unordered_set`** — stdlib hash table
+- **`make_perfect_map`** — this library's compile-time PHF
+- **`gperf`** — GNU `gperf`-generated lookup
+- **`std::unordered_map`** — stdlib hash table
 - **`ankerl::unordered_dense`** — fast flat hash map
 - **`absl::flat_hash_map`** — Google's SwissTable
 - **`frozen::unordered_map`** — compile-time perfect hash
 - **`kronuz::phf`** — hash-based perfect hash
-- **Naive** — if/else chain
-- **Binary search** — `std::binary_search` over a sorted array
+- **`pthash`** — PTHash minimal perfect hash
+- **Naive** — if/else chain (binary search for the 100-key ticker set)
 
 The gperf `.inc` baselines are pre-generated from the `.gperf` input files in `benchmarks/` using `gperf <file>.gperf > <file>_gperf.inc`.
 

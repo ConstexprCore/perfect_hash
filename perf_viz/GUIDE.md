@@ -1,12 +1,12 @@
 # Performance Visualization Guide
 
-This guide walks through each of the 10 analysis tools with example output from an Apple M3 Max (arm64, -O3, shuffled workloads, `sudo` for hardware perf counters).
+This guide walks through each of the 10 analysis tools with example output (-O3, shuffled workloads, hardware perf counters active).
 
 ## Setup
 
 ```bash
 # Build
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DPH_BUILD_BENCHMARKS=ON
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DPH_BUILD_BENCHMARKS=ON
 cmake --build build --target bench_protocol
 
 # Collect data (sudo required for cycles/insn/BM counters)
@@ -107,7 +107,7 @@ HTTP Headers            ✅ 0.00  🔴 1.40  🔴 1.23  🔴 1.50  🔴 1.73
 S&P 100 Tickers         ✅ 0.00  🔴 2.77  🔴 0.62  🔴 0.83  🔴 1.33
 ```
 
-**Insight**: PHF is a wall of green — zero branch misses across every key set. Every other method has 0.6-2.8 misses per lookup. Each miss costs ~15 cycles on the M3, explaining why methods with fewer instructions (naive: 71) are still slower than PHF (72-172).
+**Insight**: PHF is a wall of green — zero branch misses across every key set. Every other method has 0.6-2.8 misses per lookup. Branch mispredictions stall the pipeline, explaining why methods with fewer instructions (naive: 71) are still slower than PHF (72-172).
 
 ---
 
@@ -220,7 +220,7 @@ sudo bash perf_viz/08_flamegraph.sh
 # Opens perf_viz/flamegraph.svg
 ```
 
-On Linux, uses `perf record`. On macOS, uses `sample(1)`. For best results on macOS, use Instruments.app with the "Time Profiler" template.
+On Linux, uses `perf record` and the `FlameGraph` scripts from https://github.com/brendangregg/FlameGraph.
 
 ---
 

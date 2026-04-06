@@ -55,8 +55,8 @@ def text_plot(data):
         print(f"  {marker} {method:<20s} {d['keyset']:<20s} {d['insn']:6.0f} {d['ipc']:6.2f} {d['ns']:7.2f} {d.get('bm', -1):5.2f}")
 
     print("\n★ = zero branch misses")
-    print("\nINSIGHT: PHF achieves IPC 8-9 (near M3 max of ~10) with 72-172 insn.")
-    print("         Naive has only 71 insn but IPC < 2 due to branch misses.")
+    print("\nINSIGHT: PHF achieves peak IPC with 72-172 insn due to zero branch misses.")
+    print("         Naive has only 71 insn for protocols but low IPC due to branch misses.")
     print("         More instructions + zero branches = faster execution.")
 
 def mpl_plot(data):
@@ -85,8 +85,7 @@ def mpl_plot(data):
     ax.set_ylabel("IPC (instructions per cycle)", fontsize=12)
     ax.set_title("IPC vs Instruction Count (bubble size = ns/lookup)\n"
                  "Top-left = fast (high IPC, few insn). Bottom-right = slow.", fontsize=13)
-    ax.axhline(y=8, color='gray', linestyle='--', alpha=0.3, label='M3 ~max IPC')
-    ax.set_ylim(0, 10)
+    ax.set_ylim(0, 12)
     ax.grid(True, alpha=0.2)
 
     plt.tight_layout()

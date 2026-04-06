@@ -30,3 +30,24 @@ target_compile_options(phf_tests PRIVATE
 
 include(${doctest_SOURCE_DIR}/scripts/cmake/doctest.cmake)
 doctest_discover_tests(phf_tests)
+
+if(PH_SINGLEHEADER_AVAILABLE)
+    add_executable(phf_singleheader_smoke
+        test_singleheader_smoke.cpp
+    )
+
+    target_include_directories(phf_singleheader_smoke PRIVATE
+        "${PH_SINGLEHEADER_OUTPUT_DIR}"
+    )
+
+    target_compile_features(phf_singleheader_smoke PRIVATE cxx_std_23)
+    target_compile_options(phf_singleheader_smoke PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>
+        $<$<CXX_COMPILER_ID:GNU>:-fconstexpr-ops-limit=1000000000>
+        $<$<CXX_COMPILER_ID:Clang,AppleClang>:-fconstexpr-steps=1000000000>
+        $<$<CXX_COMPILER_ID:MSVC>:/W4 /constexpr:steps1000000000>
+    )
+
+    add_dependencies(phf_singleheader_smoke perfect_hash_singleheader)
+    add_test(NAME phf_singleheader_smoke COMMAND phf_singleheader_smoke)
+endif()
