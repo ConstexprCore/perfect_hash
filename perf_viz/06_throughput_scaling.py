@@ -55,8 +55,14 @@ def main():
         naive = row.get("naive")
         print(f"{n:5d}  {phf or 0:7.2f}  {absl or 0:7.2f}  {umap or 0:7.2f}  {ankerl or 0:7.2f}  {naive or 0:7.2f}  {ks_name}")
 
-    print("\nPHF scales from 2.06 ns (N=6) to 2.89 ns (N=100) — nearly flat O(1).")
-    print("Binary search (naive for N=100) scales to 46 ns — O(log N).")
+    # Dynamic summary from loaded data
+    phf_rows = [(n, d["ns"]) for d in hits if d["method"] == "make_perfect_map"
+                for n2, d2 in [(d["N"], d)] if n2 == d["N"]]
+    phf_by_n = {d["N"]: d["ns"] for d in hits if d["method"] == "make_perfect_map"}
+    if phf_by_n:
+        min_n, max_n = min(phf_by_n), max(phf_by_n)
+        print(f"\nPHF scales from {phf_by_n[min_n]:.2f} ns (N={min_n}) to "
+              f"{phf_by_n[max_n]:.2f} ns (N={max_n}) — nearly flat O(1).")
 
     if HAS_MPL:
         fig, ax = plt.subplots(figsize=(10, 6))

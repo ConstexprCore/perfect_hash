@@ -35,6 +35,44 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(useful_abstractions)
 
+find_package(Python3 COMPONENTS Interpreter QUIET)
+
+set(PH_SINGLEHEADER_AVAILABLE OFF)
+if(Python3_Interpreter_FOUND)
+    set(PH_SINGLEHEADER_OUTPUT_DIR "${CMAKE_CURRENT_BINARY_DIR}/singleheader")
+    set(PH_SINGLEHEADER_OUTPUT "${PH_SINGLEHEADER_OUTPUT_DIR}/perfect_hash.h")
+    set(PH_SINGLEHEADER_GENERATOR "${CMAKE_CURRENT_SOURCE_DIR}/tools/generate_singleheader.py")
+    set(PH_FIXED_STRING_HEADER
+        "${useful_abstractions_SOURCE_DIR}/include/ConstexprCore/fixed_string.h")
+
+    add_custom_command(
+        OUTPUT "${PH_SINGLEHEADER_OUTPUT}"
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${PH_SINGLEHEADER_OUTPUT_DIR}"
+        COMMAND ${Python3_EXECUTABLE} "${PH_SINGLEHEADER_GENERATOR}"
+            --output "${PH_SINGLEHEADER_OUTPUT}"
+            --fixed-string "${PH_FIXED_STRING_HEADER}"
+            --gperf-generator "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/detail/gperf_generator.h"
+            --neon-compare "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/detail/neon_compare.h"
+            --sse2-compare "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/detail/sse2_compare.h"
+            --perfect-hash "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/perfect_hash.h"
+        DEPENDS
+            "${PH_SINGLEHEADER_GENERATOR}"
+            "${PH_FIXED_STRING_HEADER}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/detail/gperf_generator.h"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/detail/neon_compare.h"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/detail/sse2_compare.h"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/perfect_hash.h"
+        VERBATIM
+        COMMENT "Generating single-header perfect_hash.h"
+    )
+
+    add_custom_target(perfect_hash_singleheader DEPENDS "${PH_SINGLEHEADER_OUTPUT}")
+    install(FILES "${PH_SINGLEHEADER_OUTPUT}" DESTINATION include OPTIONAL)
+    set(PH_SINGLEHEADER_AVAILABLE ON)
+else()
+    message(STATUS "Python3 interpreter not found; skipping single-header generation target")
+endif()
+
 # Header-only library
 add_library(perfect_hash INTERFACE)
 add_library(ConstexprCore::perfect_hash ALIAS perfect_hash)

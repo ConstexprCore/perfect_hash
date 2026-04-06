@@ -6,7 +6,7 @@ Tools for analyzing and visualizing PHF benchmark performance.
 
 ```bash
 # Build benchmarks
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_OSX_ARCHITECTURES=arm64 -DPH_BUILD_BENCHMARKS=ON
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DPH_BUILD_BENCHMARKS=ON
 cmake --build build --target bench_protocol
 
 # Collect data (run with sudo for perf counters)
@@ -43,16 +43,34 @@ python3 perf_viz/10_regression_tracker.py                  # after changes
 
 | # | Tool | Output | Description |
 |---|------|--------|-------------|
-| 01 | instruction_breakdown | text | Stacked bar: where instructions go per key set |
+| 01 | instruction_breakdown | text | Stacked bar: where instructions go per key set (PHF only) |
 | 02 | ipc_roofline | text + PNG | IPC vs insn scatter (branchless vs branchy) |
-| 03 | branch_miss_heatmap | text + PNG | Key set × method BM matrix |
-| 04 | asm_analysis | text | Annotated ARM64 assembly with section counts |
+| 03 | branch_miss_heatmap | text + PNG | Key set × method branch-miss matrix |
+| 04 | asm_analysis | text | Annotated assembly with section counts |
 | 05 | compile_time_curve | text + PNG | Compilation time vs N (gperf vs H&D) |
 | 06 | throughput_scaling | text + PNG | ns/lookup vs N for each method |
 | 07 | memory_footprint | text + PNG | Struct size comparison |
-| 08 | flamegraph | SVG | CPU time flame graph |
+| 08 | flamegraph | SVG | CPU time flame graph (requires FlameGraph tools) |
 | 09 | live_dashboard | terminal | Real-time ns/IPC/BM display |
 | 10 | regression_tracker | text | Compare current vs baseline, flag >5% regressions |
+
+## Methods benchmarked
+
+`make_perfect_map`, `gperf`, `std::unordered_map`, `ankerl::dense`,
+`absl::flat_hash_map`, `frozen::unordered_map`, `kronuz::phf`, `pthash`, `naive`
+
+## Key sets
+
+| Filter token | Display name | N | MaxKeyLen |
+|---|---|---|---|
+| `protocol` | URL Protocols | 6 | 5 |
+| `stock` | S&P 100 Tickers | 100 | 5 |
+| `keyword` | C++ Keywords | 15 | 6 |
+| `header` | HTTP Headers | 20 | 17 |
+| `mime` | MIME Types | 15 | 24 |
+| `letters` | Letters a-z | 26 | 1 |
+| `headers50` | HTTP Headers 50 | 50 | 19 |
+| `jsreserved` | JavaScript Reserved Words | 45 | 10 |
 
 ## Data Format
 
