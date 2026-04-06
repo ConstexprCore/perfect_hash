@@ -1,0 +1,78 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # ── GCC 14 · Linux x86-64 ────────────────────────────────────────
+          - name: GCC 14 · Linux
+            os: ubuntu-24.04
+            cc: gcc-14
+            cxx: g++-14
+
+          # ── Clang 18 · Linux x86-64 (SSE2 path) ─────────────────────────
+          - name: Clang 18 · Linux
+            os: ubuntu-24.04
+            cc: clang-18
+            cxx: clang++-18
+
+          # ── AppleClang · macOS ARM64 (NEON path) ─────────────────────────
+          - name: AppleClang · macOS ARM64
+            os: macos-15
+
+          # ── MSVC 2022 · Windows x64 ──────────────────────────────────────
+          - name: MSVC 2022 · Windows
+            os: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── HTTPS credentials for private dependency: ConstexprCore/useful_abstractions ─
+      - name: Configure git credentials
+        run: git config --global url."https://x-access-token:${{ secrets.USEFUL_ABSTRACTIONS_PAT }}@github.com/".insteadOf "https://github.com/"
+
+      # ── Linux: ensure requested compiler version is installed ─────────────
+      - name: Install compiler (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y ${{ matrix.cc }} ${{ matrix.cxx }}
+
+      # ── CMake configure ───────────────────────────────────────────────────
+      - name: Configure (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER=${{ matrix.cc }} \
+            -DCMAKE_CXX_COMPILER=${{ matrix.cxx }} \
+            -DPH_BUILD_BENCHMARKS=OFF
+
+      - name: Configure (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPH_BUILD_BENCHMARKS=OFF
+
+      - name: Configure (Windows)
+        if: runner.os == 'Windows'
+        run: cmake -B build -G "Visual Studio 17 2022" -A x64 -DPH_BUILD_BENCHMARKS=OFF
+
+      # ── Build ─────────────────────────────────────────────────────────────
+      - name: Build
+        run: cmake --build build --config Release
+
+      # ── Test ──────────────────────────────────────────────────────────────
+      - name: Test
+        run: ctest --test-dir build -C Release --output-on-failure

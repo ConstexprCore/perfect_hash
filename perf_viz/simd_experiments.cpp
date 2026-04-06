@@ -257,11 +257,11 @@ int main() {
   auto neon_load_masked = [](const char* data, size_t len) __attribute__((always_inline)) -> uint8x16_t {
     uint8x16_t raw;
     uintptr_t addr = reinterpret_cast<uintptr_t>(data);
-    if (__builtin_expect((addr & 16383) <= 16368, 1)) {
+    if ((addr & 16383) <= 16368) [[likely]] {
       raw = vld1q_u8(reinterpret_cast<const uint8_t*>(data));
     } else {
       alignas(16) uint8_t buf[16] = {};
-      __builtin_memcpy(buf, data, len);
+      std::memcpy(buf, data, len);
       raw = vld1q_u8(buf);
     }
     return vqtbl1q_u8(raw, tbl_masks[len]);
@@ -275,7 +275,7 @@ int main() {
   constexpr size_t HDR_TS = headers.set_.table_size();
   alignas(16) uint8_t hdr_stored16[HDR_TS][16] = {};
   for (size_t s = 0; s < HDR_TS; s++)
-    __builtin_memcpy(hdr_stored16[s], hs.slot_key_data_[s].data(), 15);
+    std::memcpy(hdr_stored16[s], hs.slot_key_data_[s].data(), 15);
 
   // ========================================================================
   // EXP 6: NEON vceqq for Headers (MaxKeyLen=15)
@@ -408,11 +408,11 @@ int main() {
   alignas(16) uint8_t tick_stored16[TICK_TS][16] = {};
 
   for (size_t s = 0; s < PROTO_TS; s++)
-    __builtin_memcpy(proto_stored16[s], ps.slot_key_data_[s].data(), 5);
+    std::memcpy(proto_stored16[s], ps.slot_key_data_[s].data(), 5);
   for (size_t s = 0; s < KW_TS; s++)
-    __builtin_memcpy(kw_stored16[s], ks.slot_key_data_[s].data(), 6);
+    std::memcpy(kw_stored16[s], ks.slot_key_data_[s].data(), 6);
   for (size_t s = 0; s < TICK_TS; s++)
-    __builtin_memcpy(tick_stored16[s], ts.slot_key_data_[s].data(), 5);
+    std::memcpy(tick_stored16[s], ts.slot_key_data_[s].data(), 5);
 
   // Protocols vceqq
   gen.seed(42);

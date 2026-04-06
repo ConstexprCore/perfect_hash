@@ -57,7 +57,7 @@ inline constexpr std::uint8_t and_masks[17][16] = {
 // Falls back to byte-by-byte copy for addresses near page boundaries.
 CONSTEXPRCORE_NO_SANITIZE_ADDRESS constexprcore_really_inline __m128i page_safe_load_16(const char* p, std::size_t len) noexcept {
     uintptr_t addr = reinterpret_cast<uintptr_t>(p);
-    if (__builtin_expect((addr & 4095) <= 4096 - 16, 1)) {
+    if ((addr & 4095) <= 4096 - 16) [[likely]] {
         return _mm_loadu_si128(reinterpret_cast<const __m128i*>(p));
     }
     alignas(16) std::uint8_t buf[16] = {};
