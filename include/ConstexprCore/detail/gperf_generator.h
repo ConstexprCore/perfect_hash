@@ -794,10 +794,10 @@ consteval bool try_hash_and_displace(
     };
 
     // Try 2-byte key hash first (lighter runtime: 2 rounds instead of 4).
-    //if (try_placement([](std::string_view k) { return hd_key_hash_2(k); })) {
-    //    positions[2] = HD_HASH_2BYTE_FLAG;
-    //    return true;
-    //}
+    if (try_placement([](std::string_view k) { return hd_key_hash_2(k); })) {
+        positions[2] = HD_HASH_2BYTE_FLAG;
+        return true;
+    }
 
     // Fall back to 4-byte key hash (stronger mixing).
     if (try_placement([](std::string_view k) { return hd_key_hash_4(k); })) {
