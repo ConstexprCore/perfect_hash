@@ -257,7 +257,7 @@ int main() {
   auto neon_load_masked = [](const char* data, size_t len) __attribute__((always_inline)) -> uint8x16_t {
     uint8x16_t raw;
     uintptr_t addr = reinterpret_cast<uintptr_t>(data);
-    if (__builtin_expect((addr & 16383) <= 16368, 1)) {
+    if ((addr & 16383) <= 16368) [[likely]] {
       raw = vld1q_u8(reinterpret_cast<const uint8_t*>(data));
     } else {
       alignas(16) uint8_t buf[16] = {};

@@ -632,8 +632,8 @@ constexpr std::size_t hd_bucket_hash(std::string_view key) {
 
 constexpr std::size_t hd_safe_char(const char* p, std::size_t len, std::size_t idx) {
     std::size_t has = static_cast<std::size_t>(idx < len);
-    std::size_t si = idx & -has;
-    return static_cast<unsigned char>(p[si]) & -has;
+    std::size_t si = idx & (0-has);
+    return static_cast<unsigned char>(p[si]) & (0-has);
 }
 
 constexpr std::size_t hd_key_hash_2(std::string_view key) {
@@ -794,10 +794,10 @@ consteval bool try_hash_and_displace(
     };
 
     // Try 2-byte key hash first (lighter runtime: 2 rounds instead of 4).
-    //if (try_placement([](std::string_view k) { return hd_key_hash_2(k); })) {
-    //    positions[2] = HD_HASH_2BYTE_FLAG;
-    //    return true;
-    //}
+    if (try_placement([](std::string_view k) { return hd_key_hash_2(k); })) {
+        positions[2] = HD_HASH_2BYTE_FLAG;
+        return true;
+    }
 
     // Fall back to 4-byte key hash (stronger mixing).
     if (try_placement([](std::string_view k) { return hd_key_hash_4(k); })) {

@@ -1,17 +1,42 @@
-# ConstexprCore/perfect_hash
+# Billion-query-per-second lookup tables in C++ 
+[![CI](https://github.com/ConstexprCore/perfect_hash/actions/workflows/ci.yml/badge.svg)](https://github.com/ConstexprCore/perfect_hash/actions/workflows/ci.yml)
 
-Compile-time perfect hashing for C++23. Build zero-collision hash sets and maps entirely at compile time — only flat arrays survive to runtime.
 
-Uses a gperf-style association-value algorithm computed entirely in `consteval` context, producing `O(1)` lookups with no runtime construction cost.
 
-## How it works
+Compile-time perfect hashing for C++. Build zero-collision hash sets and maps entirely at compile time — only flat arrays survive to runtime. Optimized for speed ! 
 
-The generator runs at compile time in two phases:
 
-1. **Position selection** — choose a minimal set of character positions that distinguish all keys. Positions are ranked by discriminating power and selected via a bounded backtracking search.
-2. **Association-value solving** — assign a value to each character such that `h(key) = len(key) + sum(asso[key[pos]])` maps every key to a unique slot. Collisions are resolved iteratively by bumping the least-frequent character's association value.
+   * [Ridiculously fast](#ridiculously-fast)
+   * [Usage](#usage)
+      + [Perfect hash set](#perfect-hash-set)
+      + [Perfect hash map](#perfect-hash-map)
+   * [Building](#building)
+      + [Single-header bundle](#single-header-bundle)
+      + [Precompiled headers (PCH) for faster compiles](#precompiled-headers-pch-for-faster-compiles)
+      + [Tests](#tests)
+      + [Benchmarks](#benchmarks)
+         - [Benchmark design](#benchmark-design)
+   * [How it works](#how-it-works)
+   * [License](#license)
 
-At runtime, only the flat `asso_values` table, the selected positions, and a slot-to-key mapping survive — the lookup is a few additions and a single string comparison.
+
+## Ridiculously fast
+
+We use an association-value algorithm computed entirely in `consteval` context, producing `O(1)` lookups with no runtime construction cost. You can precompile your header files for fast compile time.
+
+Using an Apple M4 processor, with the URL protocol keys (`http`, `https`, `ftp`, `ws`, `wss`, `file`), we classify them as over 1 billion keys per second. It is four times faster than our closest competitor and ten times faster than the standard `std::unordered_map`.
+
+| Method                    | billion queries/s  |
+|---------------------------|-------|
+| **ours**  | 1.08  |
+| gperf  (command line)     | 0.23  |
+| kronuz::phf               | 0.22  |
+| frozen::unordered_map     | 0.16  |
+| absl::flat_hash_map       | 0.14  |
+| pthash                    | 0.14  |
+| naive                     | 0.19  |
+| std::unordered_map        | 0.10  |
+| ankerl::dense_hash_map    | 0.10  |
 
 ## Usage
 
@@ -51,41 +76,6 @@ std::optional<Method> parse_method(std::string_view s) {
 }
 ```
 
-### Constexpr perfect hash set
-
-```cpp
-#include <ConstexprCore/perfect_hash.h>
-
-using namespace ConstexprCore;
-
-constexpr auto methods = make_constexpr_perfect_set<"GET", "POST", "PUT", "DELETE", "PATCH">();
-
-bool is_valid_method(std::string_view s) {
-    return methods.contains(s);
-}
-```
-
-### Constexpr perfect hash map
-
-```cpp
-#include <ConstexprCore/perfect_hash.h>
-
-using namespace ConstexprCore;
-
-enum class Method { GET, POST, PUT, DELETE, PATCH };
-
-constexpr auto methods = make_constexpr_perfect_map<
-    kv<"GET",    Method::GET>,
-    kv<"POST",   Method::POST>,
-    kv<"PUT",    Method::PUT>,
-    kv<"DELETE", Method::DELETE>,
-    kv<"PATCH",  Method::PATCH>
->();
-
-std::optional<Method> parse_method(std::string_view s) {
-    return methods.lookup(s);
-}
-```
 
 ## Building
 
@@ -267,6 +257,10 @@ cmake --build build --target fun_demo
 
 This lets CMake manage the compiler-specific PCH details automatically.
 
+
+
+
+
 ### Tests
 
 Tests are built by default (`PH_BUILD_TESTS=ON`):
@@ -320,15 +314,16 @@ Each key set is tested with three query mixes (positive-only, negative-only, 50/
 
 The gperf `.inc` baselines are pre-generated from the `.gperf` input files in `benchmarks/` using `gperf <file>.gperf > <file>_gperf.inc`.
 
-#### Preventing constant-folding
 
-Because PHF objects and key arrays are `constexpr`, the compiler can resolve every lookup at compile time if not careful. The benchmarks use `benchmark::DoNotOptimize(key)` on each key *before* the lookup call, which forces the compiler to treat the key as potentially modified and prevents it from constant-folding the result.
+## How it works
 
-## Dependencies
+The generator runs at compile time in two phases:
 
-- [ConstexprCore/useful_abstractions](https://github.com/ConstexprCore/useful_abstractions) — fetched automatically via CMake `FetchContent`
-- [doctest](https://github.com/doctest/doctest) v2.4.12 (tests only)
-- [Google Benchmark](https://github.com/google/benchmark) v1.8.3 (benchmarks only)
+1. **Position selection** — choose a minimal set of character positions that distinguish all keys. Positions are ranked by discriminating power and selected via a bounded backtracking search.
+2. **Association-value solving** — assign a value to each character such that `h(key) = len(key) + sum(asso[key[pos]])` maps every key to a unique slot. Collisions are resolved iteratively by bumping the least-frequent character's association value.
+
+At runtime, only the flat `asso_values` table, the selected positions, and a slot-to-key mapping survive — the lookup is a few additions and a single string comparison.
+
 
 ## License
 
