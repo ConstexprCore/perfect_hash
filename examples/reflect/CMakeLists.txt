@@ -36,15 +36,14 @@ target_compile_options(constexprcore_reflect INTERFACE
 add_executable(reflect_demo examples/basic_usage.cpp)
 target_link_libraries(reflect_demo PRIVATE ConstexprCore::reflect)
 
-# Tests (only if doctest is available)
-if(TARGET doctest::doctest OR TARGET doctest_with_main)
+# Tests
+if(TARGET doctest::doctest)
     add_executable(reflect_tests tests/test_reflect.cpp)
     target_link_libraries(reflect_tests PRIVATE
         ConstexprCore::reflect
-    )
-    # doctest is included directly in the test file via DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
-    target_include_directories(reflect_tests PRIVATE
-        ${doctest_SOURCE_DIR}/doctest
+        doctest::doctest
     )
     add_test(NAME reflect_tests COMMAND reflect_tests)
+else()
+    message(STATUS "reflect: doctest not found, skipping reflect_tests")
 endif()

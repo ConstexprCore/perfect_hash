@@ -146,8 +146,9 @@ TEST_CASE("all-same-type struct") {
 
 TEST_CASE("many fields struct") {
     ManyFields m{10, 20, 30, 40, 50, 60, 70, 80, 90, 100};
-    CHECK(reflect_get(m, "f1").as<int>() == 10);
-    CHECK(reflect_get(m, "f10").as<int>() == 100);
+    // All fields are int, so use index-based get<I>() not type-based as<int>()
+    CHECK(reflect_get(m, "f1").get<0>() == 10);
+    CHECK(reflect_get(m, "f10").get<9>() == 100);
     CHECK(reflect_size<ManyFields>() == 10);
 }
 

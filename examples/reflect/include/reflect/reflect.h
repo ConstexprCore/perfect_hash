@@ -160,13 +160,22 @@ constexpr std::size_t reflect_size() {
 template <typename T>
 auto reflect_get(const T& obj, std::string_view field_name) -> detail::field_value_t<T> {
     using Meta = detail::type_meta<T>;
+    using V = detail::field_value_t<T>;
     auto idx = Meta::set.index_of(field_name);
     if (!idx) throw std::runtime_error("Unknown field: " + std::string(field_name));
 
-    detail::field_value_t<T> result;
-    detail::dispatch_const(obj, *idx, [&](const auto& val) {
-        result.data = val;
-    }, std::make_index_sequence<Meta::N>{});
+    // Use index-based variant construction to handle duplicate types correctly.
+    V result;
+    [&]<std::size_t... Is>(std::index_sequence<Is...>) {
+        (([&]() -> bool {
+            if (*idx == Is) {
+                constexpr auto mem = detail::field_at<T>(Is);
+                result.data.template emplace<Is>(obj.[:mem:]);
+                return true;
+            }
+            return false;
+        }()) || ...);
+    }(std::make_index_sequence<Meta::N>{});
     return result;
 }
 
