@@ -16,6 +16,19 @@
 
 #if CONSTEXPRCORE_HAS_REFLECTION
 
+// ── Compiler compatibility ──────────────────────────────────────────────────
+// Bloomberg Clang P2996 fork: ^T (single caret), no access_context arg
+// GCC 16 trunk (P2996):       ^^T (double caret), requires access_context::current()
+#if defined(__GNUC__) && !defined(__clang__)
+// GCC trunk
+#define CONSTEXPRCORE_REFLECT_OF(T) (^^T)
+#define CONSTEXPRCORE_NSDM_OF(T)    std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current())
+#else
+// Bloomberg Clang P2996 fork
+#define CONSTEXPRCORE_REFLECT_OF(T) (^T)
+#define CONSTEXPRCORE_NSDM_OF(T)    std::meta::nonstatic_data_members_of(^T)
+#endif
+
 #include <ConstexprCore/perfect_hash.h>
 #include <array>
 #include <iostream>
@@ -65,19 +78,19 @@ namespace detail {
 // Count nonstatic data members of T.
 template <typename T>
 consteval std::size_t field_count() {
-    return std::meta::nonstatic_data_members_of(^T).size();
+    return CONSTEXPRCORE_NSDM_OF(T).size();
 }
 
 // Get the i-th nonstatic data member reflection.
 template <typename T>
 consteval std::meta::info field_at(std::size_t i) {
-    return std::meta::nonstatic_data_members_of(^T)[i];
+    return CONSTEXPRCORE_NSDM_OF(T)[i];
 }
 
 // Build array of field names.
 template <typename T, std::size_t N>
 consteval auto compute_names() {
-    auto members = std::meta::nonstatic_data_members_of(^T);
+    auto members = CONSTEXPRCORE_NSDM_OF(T);
     std::array<std::string_view, N> result{};
     for (std::size_t i = 0; i < N; ++i)
         result[i] = std::meta::identifier_of(members[i]);
@@ -114,11 +127,11 @@ struct type_meta {
 // Build field_value type from reflected member types.
 template <typename T>
 consteval std::meta::info make_field_value_type() {
-    auto members = std::meta::nonstatic_data_members_of(^T);
+    auto members = CONSTEXPRCORE_NSDM_OF(T);
     std::vector<std::meta::info> types;
     for (auto m : members)
         types.push_back(std::meta::type_of(m));
-    return std::meta::substitute(^field_value, types);
+    return std::meta::substitute(CONSTEXPRCORE_REFLECT_OF(field_value), types);
 }
 
 template <typename T>
@@ -168,7 +181,7 @@ constexpr std::size_t reflect_size() {
 }
 
 template <typename T>
-auto reflect_get(const T& obj, std::string_view field_name) -> detail::field_value_t<T> {
+auto reflect_get(const T& obj, std::string_view field_name) {
     using Meta = detail::type_meta<T>;
     using V = detail::field_value_t<T>;
     auto idx = Meta::set.index_of(field_name);
