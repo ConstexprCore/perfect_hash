@@ -15,12 +15,16 @@ target_link_libraries(constexprcore_reflect INTERFACE
     ConstexprCore::perfect_hash
 )
 
-# C++26 with reflection support
-target_compile_features(constexprcore_reflect INTERFACE cxx_std_26)
-target_compile_options(constexprcore_reflect INTERFACE
-    $<$<CXX_COMPILER_ID:Clang,AppleClang>:-freflection>
-    $<$<CXX_COMPILER_ID:GNU>:-freflection>
-)
+# C++26 with reflection support.
+# Bloomberg Clang P2996 fork: -freflection -fexpansion-statements -stdlib=libc++
+# Best configured via CMAKE_CXX_FLAGS="-std=c++26 -freflection" at cmake configure time.
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(constexprcore_reflect INTERFACE
+        -freflection -fexpansion-statements -stdlib=libc++)
+    target_link_options(constexprcore_reflect INTERFACE -stdlib=libc++)
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(constexprcore_reflect INTERFACE -freflection)
+endif()
 
 # Constexpr step limits for compile-time PHF generation
 target_compile_options(constexprcore_reflect INTERFACE

@@ -701,19 +701,14 @@ consteval auto make_perfect_set() {
 // fixed_string NTTPs. Useful when keys are generated programmatically at
 // consteval time (e.g., from C++26 reflection).
 
-template <std::size_t N>
-consteval auto make_perfect_set_from_array(const std::array<std::string_view, N>& keys) {
-    static_assert(N > 0, "make_perfect_set_from_array requires at least one key");
-
-    for (std::size_t i = 0; i < N; ++i)
-        for (std::size_t j = i + 1; j < N; ++j)
-            if (keys[i] == keys[j])
-                throw "Duplicate key in make_perfect_set_from_array";
-
-    constexpr auto data = detail::compute_phf<N>(keys);
-    constexpr std::size_t M = data.table_size;
-    constexpr std::size_t MaxLen = detail::max_key_length(keys) > 0 ? detail::max_key_length(keys) : 1;
-    return perfect_hash_set<N, M, MaxLen>{keys, data};
+// Factory from pre-computed PHF data + keys array. The caller provides
+// TableSize and MaxKeyLen as template parameters (discovered from phf_result
+// and the keys at constexpr/consteval time).
+template <std::size_t N, std::size_t TableSize, std::size_t MaxKeyLen>
+consteval auto make_perfect_set_from_phf(
+    const std::array<std::string_view, N>& keys,
+    const detail::phf_result<N>& data) {
+    return perfect_hash_set<N, TableSize, MaxKeyLen>{keys, data};
 }
 
 // ============================================================================
