@@ -1,14 +1,24 @@
 #ifndef CONSTEXPRCORE_REFLECT_H
 #define CONSTEXPRCORE_REFLECT_H
 
+// C++26 reflection guard: skip this header entirely if the compiler
+// doesn't support reflection, so including it is a no-op rather than
+// a hard compile error.
+#if __has_include(<meta>)
+#include <meta>
+#define CONSTEXPRCORE_HAS_REFLECTION 1
+#elif __has_include(<experimental/meta>)
+#include <experimental/meta>
+#define CONSTEXPRCORE_HAS_REFLECTION 1
+#else
+#define CONSTEXPRCORE_HAS_REFLECTION 0
+#endif
+
+#if CONSTEXPRCORE_HAS_REFLECTION
+
 #include <ConstexprCore/perfect_hash.h>
 #include <array>
 #include <iostream>
-#if __has_include(<meta>)
-#include <meta>
-#else
-#include <experimental/meta>
-#endif
 #include <optional>
 #include <stdexcept>
 #include <string_view>
@@ -234,5 +244,7 @@ bool reflect_has(std::string_view field_name) {
 }
 
 } // namespace ConstexprCore::reflect
+
+#endif // CONSTEXPRCORE_HAS_REFLECTION
 
 #endif // CONSTEXPRCORE_REFLECT_H
