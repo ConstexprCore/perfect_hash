@@ -60,7 +60,8 @@ namespace ConstexprCore::reflect {
 
 template <typename... Ts>
 struct field_value {
-    std::variant<Ts...> data;
+    using variant_type = std::variant<Ts...>;
+    variant_type data;
 
     // Printing: std::cout << reflect_get(obj, "name");
     // Defined inline as a hidden friend (found only via ADL).
@@ -192,19 +193,21 @@ auto reflect_get(const T& obj, std::string_view field_name) {
     auto idx = Meta::set.index_of(field_name);
     if (!idx) throw std::runtime_error("Unknown field: " + std::string(field_name));
 
-    // Use index-based variant emplace to handle duplicate field types correctly.
-    V result;
+    // Construct the variant directly with the matched alternative via
+    // std::in_place_index. Avoids default-constructing the variant (which
+    // would fail if the first field type isn't default-constructible).
+    std::optional<V> result;
     [&]<std::size_t... Is>(std::index_sequence<Is...>) {
         (([&]() -> bool {
             if (*idx == Is) {
                 constexpr auto mem = Meta::members_[Is];
-                result.data.template emplace<Is>(obj.[:mem:]);
+                result.emplace(V{typename V::variant_type(std::in_place_index<Is>, obj.[:mem:])});
                 return true;
             }
             return false;
         }()) || ...);
     }(std::make_index_sequence<Meta::N>{});
-    return result;
+    return std::move(*result);
 }
 
 template <typename T, typename V>
