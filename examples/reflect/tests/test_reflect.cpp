@@ -1,6 +1,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest/doctest.h>
 #include <reflect/reflect.h>
+#include <sstream>
 #include <string>
 
 using namespace ConstexprCore::reflect;
@@ -159,4 +160,28 @@ TEST_CASE("mutable reflect_for_each") {
             val = 0;
     });
     CHECK(p.age == 0);
+}
+
+TEST_CASE("reflect_set type mismatch throws") {
+    Person p{"Bob", 42, 1.85};
+    // "age" is int, passing a string should throw
+    CHECK_THROWS_AS(reflect_set(p, "age", std::string("hello")), std::runtime_error);
+    // Verify original value is unchanged
+    CHECK(p.age == 42);
+}
+
+TEST_CASE("reflect_get printability for all types") {
+    Person p{"Alice", 30, 1.70};
+
+    std::ostringstream os_name;
+    os_name << reflect_get(p, "name");
+    CHECK(os_name.str() == "Alice");
+
+    std::ostringstream os_age;
+    os_age << reflect_get(p, "age");
+    CHECK(os_age.str() == "30");
+
+    std::ostringstream os_height;
+    os_height << reflect_get(p, "height");
+    CHECK(os_height.str().substr(0, 3) == "1.7");
 }
