@@ -121,7 +121,7 @@ struct type_meta {
     static constexpr std::size_t N = field_count<T>();
     static constexpr auto members_ = cache_members<T, N>();
     static constexpr auto names = extract_names(members_);
-    static constexpr auto phf = ConstexprCore::detail::compute_phf<N>(names);
+    static constexpr auto phf = ConstexprCore::compute_phf(names);
     static constexpr std::size_t TS = phf.table_size;
     static constexpr std::size_t MKL = max_name_len(names);
     static constexpr auto set =
