@@ -75,59 +75,58 @@ struct field_value {
 
 namespace detail {
 
-// Count nonstatic data members of T.
+// Enumerate members exactly once per type. All other helpers derive from this.
 template <typename T>
 consteval std::size_t field_count() {
     return CONSTEXPRCORE_NSDM_OF(T).size();
 }
 
-// Get the i-th nonstatic data member reflection.
-template <typename T>
-consteval std::meta::info field_at(std::size_t i) {
-    return CONSTEXPRCORE_NSDM_OF(T)[i];
+// Cached member list: called once per type, result stored in type_meta::members_.
+// All index-based access goes through this cached array instead of re-calling
+// nonstatic_data_members_of.
+template <typename T, std::size_t N>
+consteval auto cache_members() {
+    auto vec = CONSTEXPRCORE_NSDM_OF(T);
+    std::array<std::meta::info, N> result{};
+    for (std::size_t i = 0; i < N; ++i)
+        result[i] = vec[i];
+    return result;
 }
 
-// Build array of field names.
-template <typename T, std::size_t N>
-consteval auto compute_names() {
-    auto members = CONSTEXPRCORE_NSDM_OF(T);
+// Derive field names from the cached member array (no additional reflection call).
+template <std::size_t N>
+consteval auto extract_names(const std::array<std::meta::info, N>& members) {
     std::array<std::string_view, N> result{};
     for (std::size_t i = 0; i < N; ++i)
         result[i] = std::meta::identifier_of(members[i]);
     return result;
 }
 
-// Compute PHF data from reflected field names.
-template <typename T, std::size_t N>
-consteval auto compute_field_phf() {
-    auto names = compute_names<T, N>();
-    return ConstexprCore::detail::compute_phf<N>(names);
-}
-
-template <typename T, std::size_t N>
-consteval std::size_t max_field_name_len() {
-    auto names = compute_names<T, N>();
+template <std::size_t N>
+consteval std::size_t max_name_len(const std::array<std::string_view, N>& names) {
     std::size_t m = 1;
     for (auto& n : names) if (n.size() > m) m = n.size();
     return m;
 }
 
-// Per-type metadata: field names + perfect hash set.
+// Per-type reflection metadata. nonstatic_data_members_of is called exactly once
+// (in cache_members); everything else derives from the cached array.
 template <typename T>
 struct type_meta {
     static constexpr std::size_t N = field_count<T>();
-    static constexpr auto names = compute_names<T, N>();
-    static constexpr auto phf = compute_field_phf<T, N>();
+    static constexpr auto members_ = cache_members<T, N>();
+    static constexpr auto names = extract_names(members_);
+    static constexpr auto phf = ConstexprCore::detail::compute_phf<N>(names);
     static constexpr std::size_t TS = phf.table_size;
-    static constexpr std::size_t MKL = max_field_name_len<T, N>();
+    static constexpr std::size_t MKL = max_name_len(names);
     static constexpr auto set =
         ConstexprCore::make_perfect_set_from_phf<N, TS, MKL>(names, phf);
 };
 
-// Build field_value type from reflected member types.
+// Build field_value type from cached member types (no extra reflection call).
 template <typename T>
 consteval std::meta::info make_field_value_type() {
-    auto members = CONSTEXPRCORE_NSDM_OF(T);
+    constexpr auto& members = type_meta<T>::members_;
     std::vector<std::meta::info> types;
     for (auto m : members)
         types.push_back(std::meta::type_of(m));
@@ -138,25 +137,13 @@ template <typename T>
 using field_value_t = [:make_field_value_type<T>():];
 
 // Fold-expression dispatch: runtime index → compile-time field splice.
+// Uses cached members_ to avoid per-index reflection calls.
 template <typename T, typename F, std::size_t... Is>
-void dispatch_const(const T& obj, std::size_t idx, F&& f,
-                    std::index_sequence<Is...>) {
+void dispatch(auto&& obj, std::size_t idx, F&& f,
+              std::index_sequence<Is...>) {
     (([&]() -> bool {
         if (idx == Is) {
-            constexpr auto mem = field_at<T>(Is);
-            f(obj.[:mem:]);
-            return true;
-        }
-        return false;
-    }()) || ...);
-}
-
-template <typename T, typename F, std::size_t... Is>
-void dispatch_mut(T& obj, std::size_t idx, F&& f,
-                  std::index_sequence<Is...>) {
-    (([&]() -> bool {
-        if (idx == Is) {
-            constexpr auto mem = field_at<T>(Is);
+            constexpr auto mem = type_meta<T>::members_[Is];
             f(obj.[:mem:]);
             return true;
         }
@@ -187,12 +174,12 @@ auto reflect_get(const T& obj, std::string_view field_name) {
     auto idx = Meta::set.index_of(field_name);
     if (!idx) throw std::runtime_error("Unknown field: " + std::string(field_name));
 
-    // Use index-based variant construction to handle duplicate types correctly.
+    // Use index-based variant emplace to handle duplicate field types correctly.
     V result;
     [&]<std::size_t... Is>(std::index_sequence<Is...>) {
         (([&]() -> bool {
             if (*idx == Is) {
-                constexpr auto mem = detail::field_at<T>(Is);
+                constexpr auto mem = Meta::members_[Is];
                 result.data.template emplace<Is>(obj.[:mem:]);
                 return true;
             }
@@ -208,7 +195,7 @@ void reflect_set(T& obj, std::string_view field_name, V&& value) {
     auto idx = Meta::set.index_of(field_name);
     if (!idx) throw std::runtime_error("Unknown field: " + std::string(field_name));
 
-    detail::dispatch_mut(obj, *idx, [&](auto& field) {
+    detail::dispatch<T>(obj, *idx, [&](auto& field) {
         using FieldType = std::remove_reference_t<decltype(field)>;
         if constexpr (std::is_assignable_v<FieldType&, V&&>)
             field = std::forward<V>(value);
@@ -222,8 +209,8 @@ void reflect_visit(const T& obj, std::string_view field_name, F&& visitor) {
     using Meta = detail::type_meta<T>;
     auto idx = Meta::set.index_of(field_name);
     if (!idx) throw std::runtime_error("Unknown field: " + std::string(field_name));
-    detail::dispatch_const(obj, *idx, std::forward<F>(visitor),
-                           std::make_index_sequence<Meta::N>{});
+    detail::dispatch<T>(obj, *idx, std::forward<F>(visitor),
+                        std::make_index_sequence<Meta::N>{});
 }
 
 template <typename T, typename F>
@@ -231,24 +218,24 @@ void reflect_visit(T& obj, std::string_view field_name, F&& visitor) {
     using Meta = detail::type_meta<T>;
     auto idx = Meta::set.index_of(field_name);
     if (!idx) throw std::runtime_error("Unknown field: " + std::string(field_name));
-    detail::dispatch_mut(obj, *idx, std::forward<F>(visitor),
-                         std::make_index_sequence<Meta::N>{});
+    detail::dispatch<T>(obj, *idx, std::forward<F>(visitor),
+                        std::make_index_sequence<Meta::N>{});
 }
 
 template <typename T, typename F>
 void reflect_for_each(const T& obj, F&& visitor) {
+    using Meta = detail::type_meta<T>;
     [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-        ((visitor(detail::type_meta<T>::names[Is],
-                  obj.[:detail::field_at<T>(Is):])), ...);
-    }(std::make_index_sequence<detail::type_meta<T>::N>{});
+        ((visitor(Meta::names[Is], obj.[:Meta::members_[Is]:])), ...);
+    }(std::make_index_sequence<Meta::N>{});
 }
 
 template <typename T, typename F>
 void reflect_for_each(T& obj, F&& visitor) {
+    using Meta = detail::type_meta<T>;
     [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-        ((visitor(detail::type_meta<T>::names[Is],
-                  obj.[:detail::field_at<T>(Is):])), ...);
-    }(std::make_index_sequence<detail::type_meta<T>::N>{});
+        ((visitor(Meta::names[Is], obj.[:Meta::members_[Is]:])), ...);
+    }(std::make_index_sequence<Meta::N>{});
 }
 
 template <typename T>
