@@ -31,7 +31,7 @@
 
 #include <ConstexprCore/perfect_hash.h>
 #include <array>
-#include <iostream>
+#include <iosfwd>
 #include <optional>
 #include <stdexcept>
 #include <string_view>
@@ -49,17 +49,22 @@ template <typename... Ts>
 struct field_value {
     std::variant<Ts...> data;
 
-    friend std::ostream& operator<<(std::ostream& os, const field_value& fv) {
+    // Printing: std::cout << reflect_get(obj, "name");
+    // Defined inline as a hidden friend (found only via ADL).
+    friend auto& operator<<(auto& os, const field_value& fv) {
         std::visit([&](const auto& v) { os << v; }, fv.data);
         return os;
     }
 
+    // Type-based extraction. Only safe when no two fields share a type.
+    // Prefer get<I>() (index-based) when the struct has duplicate field types.
     template <typename U>
     const U& as() const { return std::get<U>(data); }
 
     template <typename U>
     U& as() { return std::get<U>(data); }
 
+    // Index-based extraction (always safe, works with duplicate types).
     template <std::size_t I>
     const auto& get() const { return std::get<I>(data); }
 
