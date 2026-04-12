@@ -17,14 +17,27 @@
 #if CONSTEXPRCORE_HAS_REFLECTION
 
 // ── Compiler compatibility ──────────────────────────────────────────────────
-// Bloomberg Clang P2996 fork: ^T (single caret), no access_context arg
-// GCC 16 trunk (P2996):       ^^T (double caret), requires access_context::current()
+//
+// The P2996 standard (R13, adopted into C++26) specifies:
+//   - ^^T as the reflection operator
+//   - nonstatic_data_members_of(^^T, access_context) with mandatory access_context
+//   - access_context::current() captures the caller's access rights
+//
+// The two current implementations diverge:
+//
+//   GCC 16 trunk: matches R13 — ^^T, requires access_context::current().
+//                 Only public members are accessible from outside the class.
+//
+//   Bloomberg Clang (P2996 fork, based on an earlier revision):
+//                 Uses ^T (single caret) and nonstatic_data_members_of(^T)
+//                 without access_context. More permissive — returns all
+//                 members regardless of access. Will converge to ^^ once
+//                 Bloomberg updates to the final P2996 revision.
+//
 #if defined(__GNUC__) && !defined(__clang__)
-// GCC trunk
 #define CONSTEXPRCORE_REFLECT_OF(T) (^^T)
 #define CONSTEXPRCORE_NSDM_OF(T)    std::meta::nonstatic_data_members_of(^^T, std::meta::access_context::current())
 #else
-// Bloomberg Clang P2996 fork
 #define CONSTEXPRCORE_REFLECT_OF(T) (^T)
 #define CONSTEXPRCORE_NSDM_OF(T)    std::meta::nonstatic_data_members_of(^T)
 #endif
