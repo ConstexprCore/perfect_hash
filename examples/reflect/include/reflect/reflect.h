@@ -94,15 +94,19 @@ struct field_value {
 
 namespace detail {
 
-// Enumerate members exactly once per type. All other helpers derive from this.
+// nonstatic_data_members_of is called twice per type:
+//   1. field_count<T>() — to discover N (needed as a template parameter)
+//   2. cache_members<T, N>() — to store the member infos in a fixed-size array
+// This is unavoidable: N must be a compile-time constant before std::array<info, N>
+// can be instantiated, but N itself comes from reflecting T. After these two calls,
+// all other operations (name extraction, PHF construction, dispatch) derive from
+// the cached array with zero additional reflection calls.
+
 template <typename T>
 consteval std::size_t field_count() {
     return CONSTEXPRCORE_NSDM_OF(T).size();
 }
 
-// Cached member list: called once per type, result stored in type_meta::members_.
-// All index-based access goes through this cached array instead of re-calling
-// nonstatic_data_members_of.
 template <typename T, std::size_t N>
 consteval auto cache_members() {
     auto vec = CONSTEXPRCORE_NSDM_OF(T);
@@ -128,8 +132,8 @@ consteval std::size_t max_name_len(const std::array<std::string_view, N>& names)
     return m;
 }
 
-// Per-type reflection metadata. nonstatic_data_members_of is called exactly once
-// (in cache_members); everything else derives from the cached array.
+// Per-type reflection metadata. After the two bootstrap calls (field_count + cache_members),
+// everything else derives from the cached members_ array with no further reflection calls.
 template <typename T>
 struct type_meta {
     static constexpr std::size_t N = field_count<T>();
@@ -174,6 +178,12 @@ void dispatch(auto&& obj, std::size_t idx, F&& f,
 
 // ============================================================================
 // Public API
+//
+// Future extension: a tag_invoke-style customization point (as used in
+// simdjson's reflection-based deserialization) could allow users to override
+// reflect_get/reflect_set for types that need custom construction or
+// conversion logic. For now, the automatic reflection path handles all
+// aggregate types with public fields.
 // ============================================================================
 
 template <typename T>
