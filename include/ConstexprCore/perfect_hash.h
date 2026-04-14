@@ -695,6 +695,31 @@ consteval auto make_perfect_set() {
 }
 
 // ============================================================================
+// make_perfect_set_from_array — factory from std::array<string_view, N>
+// ============================================================================
+// ============================================================================
+// Public PHF computation + array-based factory
+// ============================================================================
+// These enable programmatic key generation at consteval (e.g., C++26 reflection)
+// without requiring fixed_string NTTPs or direct access to detail::.
+
+// Compute a perfect hash function for the given keys. Returns a phf_result
+// containing table_size, asso_values, positions, and slot_to_key mapping.
+template <std::size_t N>
+consteval auto compute_phf(const std::array<std::string_view, N>& keys) {
+    return detail::compute_phf<N>(keys);
+}
+
+// Construct a perfect_hash_set from pre-computed PHF data. The caller provides
+// TableSize and MaxKeyLen as template parameters (discovered from the phf_result).
+template <std::size_t N, std::size_t TableSize, std::size_t MaxKeyLen>
+consteval auto make_perfect_set_from_phf(
+    const std::array<std::string_view, N>& keys,
+    const detail::phf_result<N>& data) {
+    return perfect_hash_set<N, TableSize, MaxKeyLen>{keys, data};
+}
+
+// ============================================================================
 // make_perfect_map
 // ============================================================================
 
