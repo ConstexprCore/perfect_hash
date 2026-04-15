@@ -1,20 +1,19 @@
 #ifndef CONSTEXPRCORE_REFLECT_H
 #define CONSTEXPRCORE_REFLECT_H
 
-// C++26 reflection guard: skip this header entirely if the compiler
-// doesn't support reflection, so including it is a no-op rather than
-// a hard compile error.
-#if __has_include(<meta>)
-#include <meta>
+#include <version>
+
+// technically, we should rely on version and __cpp_reflection
 #define CONSTEXPRCORE_HAS_REFLECTION 1
-#elif __has_include(<experimental/meta>)
-#include <experimental/meta>
+
+#ifndef CONSTEXPRCORE_HAS_REFLECTION
+#if defined(__cpp_reflection) && __cpp_reflection >= 201902L
 #define CONSTEXPRCORE_HAS_REFLECTION 1
-#else
-#define CONSTEXPRCORE_HAS_REFLECTION 0
-#endif
+#endif 
+#endif // CONSTEXPRCORE_HAS_REFLECTION
 
 #if CONSTEXPRCORE_HAS_REFLECTION
+#include <meta>
 
 // ── Compiler compatibility ──────────────────────────────────────────────────
 //
