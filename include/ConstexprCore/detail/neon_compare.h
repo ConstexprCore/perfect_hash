@@ -143,8 +143,14 @@ constexprcore_really_inline bool neon_compare_32(const char* p, std::size_t len,
     uint8x16_t cmp1 = vceqq_u8(input1, stored1);
 
     // --- Tail bytes (16+) ---
+    // Branchless: always load from p+16 via the page-safe helper. When
+    // len <= 16, tail_len = 0 and the TBL mask zeros all 16 bytes regardless
+    // of what raw2 contains (which may be garbage past the string buffer,
+    // but the page-safe check ensures the load itself cannot fault).
+    // Avoids a 10% branch miss on inputs that straddle the 16-byte boundary
+    // (observed on HTTP Headers 50 where keys range 2-19 bytes).
     std::size_t tail_len = len > 16 ? len - 16 : 0;
-    uint8x16_t raw2 = tail_len > 0 ? page_safe_load_16(p + 16, tail_len) : vdupq_n_u8(0);
+    uint8x16_t raw2 = page_safe_load_16(p + 16, tail_len);
     uint8x16_t input2 = vqtbl1q_u8(raw2, vld1q_u8(tbl_masks[tail_len]));
     uint8x16_t stored2 = vld1q_u8(reinterpret_cast<const uint8_t*>(stored + 16));
     uint8x16_t cmp2 = vceqq_u8(input2, stored2);

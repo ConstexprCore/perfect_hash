@@ -132,8 +132,13 @@ constexprcore_really_inline bool sse2_compare_32(const char* p, std::size_t len,
     __m128i cmp1 = _mm_cmpeq_epi8(input1, stored1);
 
     // --- Tail bytes (16+) ---
+    // Branchless: always load from p+16 via the page-safe helper. When
+    // len <= 16, tail_len = 0 and the AND mask zeros all 16 bytes regardless
+    // of raw2's contents. The page-safe check inside page_safe_load_16
+    // ensures the load itself cannot fault even when p+16 is past the
+    // string buffer.
     std::size_t tail_len = len > 16 ? len - 16 : 0;
-    __m128i raw2 = tail_len > 0 ? page_safe_load_16(p + 16, tail_len) : _mm_setzero_si128();
+    __m128i raw2 = page_safe_load_16(p + 16, tail_len);
     __m128i mask2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(and_masks[tail_len]));
     __m128i input2 = _mm_and_si128(raw2, mask2);
     __m128i stored2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(stored + 16));
