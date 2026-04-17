@@ -13,7 +13,11 @@
 #endif // CONSTEXPRCORE_HAS_REFLECTION
 
 #if CONSTEXPRCORE_HAS_REFLECTION
+#if __has_include(<meta>)
 #include <meta>
+#else
+#include <experimental/meta>
+#endif
 
 // ── Compiler compatibility ──────────────────────────────────────────────────
 //
@@ -173,6 +177,27 @@ void dispatch(auto&& obj, std::size_t idx, F&& f,
     }()) || ...);
 }
 
+// Recursive value-producing dispatch: returns V directly from the matched
+// branch so NRVO can construct the result in the caller's storage. Avoids
+// the std::optional<V> + std::move round-trip that a fold expression would
+// require (each std::optional operation adds a variant move + destruction,
+// doubling the cost when V contains types with non-trivial destructors like
+// std::string).
+template <typename T, typename V, std::size_t I>
+V get_value(const T& obj, std::size_t idx) {
+    using Meta = type_meta<T>;
+    if constexpr (I >= Meta::N) {
+        // Unreachable: idx is always < N because index_of validated it.
+        __builtin_unreachable();
+    } else {
+        constexpr auto mem = Meta::members_[I];
+        if (idx == I) {
+            return V{typename V::variant_type(std::in_place_index<I>, obj.[:mem:])};
+        }
+        return get_value<T, V, I + 1>(obj, idx);
+    }
+}
+
 } // namespace detail
 
 // ============================================================================
@@ -201,22 +226,9 @@ auto reflect_get(const T& obj, std::string_view field_name) {
     using V = detail::field_value_t<T>;
     auto idx = Meta::set.index_of(field_name);
     if (!idx) throw std::runtime_error("Unknown field: " + std::string(field_name));
-
-    // Construct the variant directly with the matched alternative via
-    // std::in_place_index. Avoids default-constructing the variant (which
-    // would fail if the first field type isn't default-constructible).
-    std::optional<V> result;
-    [&]<std::size_t... Is>(std::index_sequence<Is...>) {
-        (([&]() -> bool {
-            if (*idx == Is) {
-                constexpr auto mem = Meta::members_[Is];
-                result.emplace(V{typename V::variant_type(std::in_place_index<Is>, obj.[:mem:])});
-                return true;
-            }
-            return false;
-        }()) || ...);
-    }(std::make_index_sequence<Meta::N>{});
-    return std::move(*result);
+    // Dispatch to the matching branch; returns V via NRVO, avoiding the
+    // double variant construction/destruction cost of a fold + optional pattern.
+    return detail::get_value<T, V, 0>(obj, *idx);
 }
 
 template <typename T, typename V>
