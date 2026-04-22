@@ -6,7 +6,6 @@
 #include <string_view>
 #include <random>
 #include <print>
-#include "counters/bench.h"
 #include "ConstexprCore/perfect_hash.h"
 
 void pretty_print(const std::string &name, size_t num_values,
@@ -24,10 +23,17 @@ void pretty_print(const std::string &name, size_t num_values,
   std::print("\n");
 }
 
-struct Person {
-    std::string name;
-    int age;
-    double height;
+struct stats {
+    int total_items;          // Total number of items processed
+    int successful_operations; // Number of operations that succeeded
+    int failed_operations;     // Number of operations that failed
+    int warnings;             // Number of warnings encountered
+    int errors;               // Number of errors encountered
+    int retries;              // Number of retry attempts
+    int bytes_processed;      // Total bytes processed
+    int records_read;         // Number of records read
+    int records_written;      // Number of records written
+    int records_validated;    // Number of records that passed validation
 };
 
 template <class Function1, class Function2>
@@ -47,45 +53,54 @@ counters::event_aggregate shuffle_bench(Function1 &&function1,
   return aggregate;
 }
 
-int main() {
-    Person p{"Alice", 30, 1.75};
+auto getshit(stats &p, std::string_view key) {
+    return  ConstexprCore::reflect::reflect_get(p, key);
+}
 
-    std::vector<std::string_view> keys = {"name", "age", "height"};
+int main() {
+    stats p{10, 5, 3, 1, 2, 0, 100, 50, 25, 10};
+
+    std::vector<std::string_view> keys;
     for(int i = 0; i < 1000; ++i) {
-        keys.push_back("name");
-        keys.push_back("age");
-        keys.push_back("height");
+        keys.push_back("total_items");
+        keys.push_back("successful_operations");
+        keys.push_back("failed_operations");
+        keys.push_back("warnings");
+        keys.push_back("errors");
+        keys.push_back("retries");
+        keys.push_back("bytes_processed");
+        keys.push_back("records_read");
+        keys.push_back("records_written");
+        keys.push_back("records_validated");
     }
     std::mt19937_64 gen(42);
     auto shuffle = [&]() {
         std::shuffle(keys.begin(), keys.end(), gen);
     };
+    auto naive_fn = [&]() {
+        for (auto key : keys) {
+            if(key == "total_items") p.total_items++;
+            else if(key == "successful_operations") p.successful_operations++;
+            else if(key == "failed_operations") p.failed_operations++;
+            else if(key == "warnings") p.warnings++;
+            else if(key == "errors") p.errors++;
+            else if(key == "retries") p.retries++;
+            else if(key == "bytes_processed") p.bytes_processed++;
+            else if(key == "records_read") p.records_read++;
+            else if(key == "records_written") p.records_written++;
+            else if(key == "records_validated") p.records_validated++;
+            else throw std::runtime_error("Unknown key: " + std::string(key));
+        }
+    };
+    pretty_print("naive", keys.size(),
+                 shuffle_bench(naive_fn, shuffle));
     auto reflect_fn = [&]() {
         for (auto key : keys) {
-            try {
-                auto val = ConstexprCore::reflect::reflect_get(p, key);
-            } catch (const std::exception& e) {
-                // Should not happen for valid keys
-                std::cerr << "Exception: " << e.what() << std::endl;
-            }
+            ConstexprCore::reflect::get_attribute<int>(p, key)++;
         }
     };
 
-    pretty_print("reflect_get Person fields", keys.size(),
+    pretty_print("get_attribute", keys.size(),
                  shuffle_bench(reflect_fn, shuffle));
-    static constexpr auto protocol_phf =
-    ConstexprCore::make_perfect_map<
-        ConstexprCore::kv<"name", 0>,
-        ConstexprCore::kv<"age", 1>,
-        ConstexprCore::kv<"height", 2>>();
-    auto fn = [&]() {
-        size_t idx = 0;
-        for (auto key : keys) {
-            idx += *protocol_phf.lookup(key);
-        }
-        volatile auto sink = idx; // prevent optimization
-    };
-    pretty_print("reflect_get Person fields", keys.size(),
-                 shuffle_bench(fn, shuffle));
-    return 0;
+    return EXIT_SUCCESS;
 }

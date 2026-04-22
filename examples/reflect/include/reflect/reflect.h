@@ -51,6 +51,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <variant>
 
@@ -183,6 +184,77 @@ void dispatch(auto&& obj, std::size_t idx, F&& f,
 // require (each std::optional operation adds a variant move + destruction,
 // doubling the cost when V contains types with non-trivial destructors like
 // std::string).
+[[noreturn, gnu::cold, gnu::noinline]]
+inline void throw_unknown_field(std::string_view name) {
+    throw std::runtime_error("Unknown field: " + std::string(name));
+}
+
+// Count fields whose type equals U. Consumed by get_attribute<U>(obj)
+// to diagnose "no match" vs "ambiguous" at compile time.
+template <typename T, typename U>
+consteval std::size_t count_type_matches() {
+    constexpr auto& members = type_meta<T>::members_;
+    std::size_t count = 0;
+    for (std::size_t i = 0; i < type_meta<T>::N; ++i)
+        if (std::meta::type_of(members[i]) == CONSTEXPRCORE_REFLECT_OF(U)) ++count;
+    return count;
+}
+
+// Precondition: count_type_matches<T, U>() == 1.
+template <typename T, typename U>
+consteval std::size_t find_unique_type_index() {
+    constexpr auto& members = type_meta<T>::members_;
+    for (std::size_t i = 0; i < type_meta<T>::N; ++i)
+        if (std::meta::type_of(members[i]) == CONSTEXPRCORE_REFLECT_OF(U)) return i;
+    return type_meta<T>::N;
+}
+
+// Indices into type_meta<T>::members_ for fields whose type is U, in source order.
+template <typename T, typename U>
+consteval auto u_field_indices() {
+    constexpr std::size_t K = count_type_matches<T, U>();
+    std::array<std::size_t, K> result{};
+    std::size_t j = 0;
+    for (std::size_t i = 0; i < type_meta<T>::N; ++i) {
+        if (std::meta::type_of(type_meta<T>::members_[i]) == CONSTEXPRCORE_REFLECT_OF(U)) {
+            result[j++] = i;
+        }
+    }
+    return result;
+}
+
+template <typename T, typename U, std::size_t... Js>
+consteval auto u_names_impl(std::index_sequence<Js...>) {
+    constexpr auto indices = u_field_indices<T, U>();
+    return std::array<std::string_view, sizeof...(Js)>{
+        type_meta<T>::names[indices[Js]]...
+    };
+}
+
+template <typename T, typename U, std::size_t... Js>
+consteval auto u_ptrs_impl(std::index_sequence<Js...>) {
+    constexpr auto indices = u_field_indices<T, U>();
+    return std::array<U T::*, sizeof...(Js)>{
+        (&[:type_meta<T>::members_[indices[Js]]:])...
+    };
+}
+
+// Per-(T, U) metadata: PHF over the names of U-typed fields of T, plus a
+// pointer-to-member table in matching order. Turns runtime dispatch into
+// one indexed load + one indirect member access — no branch chain.
+template <typename T, typename U>
+struct u_meta {
+    static constexpr std::size_t K = count_type_matches<T, U>();
+    static constexpr auto names = u_names_impl<T, U>(std::make_index_sequence<K>{});
+    static constexpr auto phf   = ConstexprCore::compute_phf(names);
+    static constexpr std::size_t TS  = phf.table_size;
+    static constexpr std::size_t MKL = max_name_len(names);
+    static constexpr auto set =
+        ConstexprCore::make_perfect_set_from_phf<K, TS, MKL>(names, phf);
+    static constexpr auto ptrs =
+        u_ptrs_impl<T, U>(std::make_index_sequence<K>{});
+};
+
 template <typename T, typename V, std::size_t I>
 V get_value(const T& obj, std::size_t idx) {
     using Meta = type_meta<T>;
@@ -225,10 +297,10 @@ auto reflect_get(const T& obj, std::string_view field_name) {
     using Meta = detail::type_meta<T>;
     using V = detail::field_value_t<T>;
     auto idx = Meta::set.index_of(field_name);
-    if (!idx) throw std::runtime_error("Unknown field: " + std::string(field_name));
-    // Dispatch to the matching branch; returns V via NRVO, avoiding the
-    // double variant construction/destruction cost of a fold + optional pattern.
-    return detail::get_value<T, V, 0>(obj, *idx);
+    if  (idx) [[likely]]   {
+        return detail::get_value<T, V, 0>(obj, *idx);
+    }
+    detail::throw_unknown_field(field_name);
 }
 
 template <typename T, typename V>
@@ -283,6 +355,37 @@ void reflect_for_each(T& obj, F&& visitor) {
 template <typename T>
 bool reflect_has(std::string_view field_name) {
     return detail::type_meta<T>::set.contains(field_name);
+}
+
+
+// Name-based typed field access. Dispatch is a PHF over only the U-typed
+// fields of T, followed by a single indexed pointer-to-member load — no
+// branch chain, no mispredict penalty on random keys. Throws if the name
+// is unknown in T or names a field of a different type (both cases look
+// the same to the U-subset PHF). Ill-formed at compile time if T has no
+// field of type U at all.
+template <typename U, typename T>
+constexprcore_really_inline U& get_attribute(T& obj, std::string_view field_name) {
+    static_assert(detail::count_type_matches<T, U>() > 0,
+                  "get_attribute: T has no field of this type");
+    using UM = detail::u_meta<T, U>;
+    auto idx = UM::set.index_of(field_name);
+    if (idx) [[likely]] {
+        return obj.*UM::ptrs[*idx];
+    }
+    detail::throw_unknown_field(field_name);
+}
+
+template <typename U, typename T>
+constexprcore_really_inline const U& get_attribute(const T& obj, std::string_view field_name) {
+    static_assert(detail::count_type_matches<T, U>() > 0,
+                  "get_attribute: T has no field of this type");
+    using UM = detail::u_meta<T, U>;
+    auto idx = UM::set.index_of(field_name);
+    if (idx) [[likely]] {
+        return obj.*UM::ptrs[*idx];
+    }
+    detail::throw_unknown_field(field_name);
 }
 
 } // namespace ConstexprCore::reflect
