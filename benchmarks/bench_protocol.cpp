@@ -23,6 +23,7 @@
 #include <set>
 #include <string>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #include <ankerl/unordered_dense.h>
 #include <absl/container/flat_hash_map.h>
@@ -36,7 +37,7 @@
 // Filter support: --filter hits,make_perfect_map,protocol
 //   Workloads: hits, misses, mixed
 //   Methods:   make_perfect_map, naive, unordered_map, ankerl, absl, frozen, kronuz, gperf, pthash
-//   Keysets:   protocol, stock, keyword, header, mime, jsreserved
+//   Keysets:   protocol, stock, keyword, header, mime, letters, headers50, jsreserved, counters
 // Omitting a category means "run all" for that category.
 // ============================================================================
 
@@ -60,7 +61,7 @@ BenchFilter parse_filter(const std::string &arg) {
   BenchFilter f;
   static const std::set<std::string> valid_workloads = {"hits", "misses", "mixed"};
   static const std::set<std::string> valid_methods = {"make_perfect_map", "naive", "unordered_map", "ankerl", "absl", "frozen", "kronuz", "gperf", "pthash"};
-  static const std::set<std::string> valid_keysets = {"protocol", "stock", "keyword", "header", "mime", "letters", "headers50", "jsreserved"};
+  static const std::set<std::string> valid_keysets = {"protocol", "stock", "keyword", "header", "mime", "letters", "headers50", "jsreserved", "counters"};
 
   size_t start = 0;
   while (start < arg.size()) {
@@ -1010,6 +1011,66 @@ auto gperf_jsreserved_fn = [](std::string_view s) -> std::optional<int> {
 };
 
 // ============================================================================
+// Key set 9: Counters (10 keys, snake_case telemetry fields)
+// ============================================================================
+
+static constexpr auto counters_phf =
+    ConstexprCore::make_perfect_map<
+        ConstexprCore::kv<"total_items", 0>,
+        ConstexprCore::kv<"successful_operations", 1>,
+        ConstexprCore::kv<"failed_operations", 2>,
+        ConstexprCore::kv<"warnings", 3>,
+        ConstexprCore::kv<"errors", 4>,
+        ConstexprCore::kv<"retries", 5>,
+        ConstexprCore::kv<"bytes_processed", 6>,
+        ConstexprCore::kv<"records_read", 7>,
+        ConstexprCore::kv<"records_matched", 8>,
+        ConstexprCore::kv<"records_written", 9>>();
+
+static constexpr frozen::unordered_map<frozen::string, int, 10> counters_frozen = {
+    {"total_items", 0}, {"successful_operations", 1}, {"failed_operations", 2},
+    {"warnings", 3}, {"errors", 4}, {"retries", 5},
+    {"bytes_processed", 6}, {"records_read", 7},
+    {"records_matched", 8}, {"records_written", 9}
+};
+
+static constexpr auto counters_kronuz = [] {
+  fnv1ah32 h{};
+  return phf::make_phf({
+    h("total_items"), h("successful_operations"), h("failed_operations"),
+    h("warnings"), h("errors"), h("retries"),
+    h("bytes_processed"), h("records_read"), h("records_matched"),
+    h("records_written")
+  });
+}();
+
+std::optional<int> counters_naive(std::string_view s) {
+  if (s == "total_items") return 0;
+  if (s == "successful_operations") return 1;
+  if (s == "failed_operations") return 2;
+  if (s == "warnings") return 3;
+  if (s == "errors") return 4;
+  if (s == "retries") return 5;
+  if (s == "bytes_processed") return 6;
+  if (s == "records_read") return 7;
+  if (s == "records_matched") return 8;
+  if (s == "records_written") return 9;
+  return std::nullopt;
+}
+
+// Keep gperf method available for this keyset without adding another generated gperf include.
+auto gperf_counters_fn = [](std::string_view s) -> std::optional<int> {
+  static const std::unordered_set<std::string_view> keys = {
+      "total_items", "successful_operations", "failed_operations",
+      "warnings", "errors", "retries", "bytes_processed",
+      "records_read", "records_matched", "records_written"};
+  if (keys.find(s) != keys.end()) {
+    return std::optional<int>(1);
+  }
+  return std::nullopt;
+};
+
+// ============================================================================
 // Verification
 // ============================================================================
 
@@ -1128,7 +1189,7 @@ int main(int argc, char *argv[]) {
       std::println("Filter tokens (mix and match):");
       std::println("  Workloads: hits, misses, mixed");
       std::println("  Methods:   make_perfect_map, naive, unordered_map, ankerl, absl, frozen, kronuz, gperf, pthash");
-      std::println("  Keysets:   protocol, stock, keyword, header, mime, letters, headers50, jsreserved\n");
+      std::println("  Keysets:   protocol, stock, keyword, header, mime, letters, headers50, jsreserved, counters\n");
       std::println("Omitting a category runs all values for that category.\n");
       std::println("Examples:");
       std::println("  {} --filter hits,make_perfect_map,protocol", argv[0]);
@@ -1247,6 +1308,11 @@ int main(int argc, char *argv[]) {
        "package","private","protected","public","static"},
       {"let","console","alert","document","window","Array","Object","String","Number","Boolean",
        "undefined","NaN","Infinity","Math","Date","RegExp","JSON","Promise","async","arguments"});
+    all_ok &= verify_keyset("Counters", counters_phf, counters_naive, counters_frozen, counters_kronuz, gperf_counters_fn,
+      {"total_items","successful_operations","failed_operations","warnings","errors",
+       "retries","bytes_processed","records_read","records_matched","records_written"},
+      {"records_validated","total_bytes","processed_bytes","failed_requests","invalid_records",
+       "total_records","matched_records","written_records","ok_count","error_count"});
     return all_ok ? 0 : 1;
   }
 
@@ -1354,6 +1420,16 @@ int main(int argc, char *argv[]) {
        "package","private","protected","public","static"},
       {"let","console","alert","document","window","Array","Object","String","Number","Boolean",
        "undefined","NaN","Infinity","Math","Date","RegExp","JSON","Promise","async","arguments"},
+      filter, describe);
+  }
+
+  // --- Counters (10 keys, snake_case telemetry fields) ---
+  if (filter.run_keyset("counters")) {
+    run_keyset("Counters", counters_phf, counters_naive, counters_frozen, counters_kronuz, gperf_counters_fn,
+      {"total_items","successful_operations","failed_operations","warnings","errors",
+       "retries","bytes_processed","records_read","records_matched","records_written"},
+      {"records_validated","total_bytes","processed_bytes","failed_requests","invalid_records",
+       "total_records","matched_records","written_records","ok_count","error_count"},
       filter, describe);
   }
 }
