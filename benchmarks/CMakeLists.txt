@@ -33,15 +33,17 @@ FetchContent_Declare(
     constexpr_phf
     GIT_REPOSITORY https://github.com/Kronuz/constexpr-phf.git
     GIT_TAG master
+    SOURCE_SUBDIR _skip_add_subdirectory
 )
-FetchContent_Populate(constexpr_phf)
+FetchContent_MakeAvailable(constexpr_phf)
 
 FetchContent_Declare(
     pthash
     GIT_REPOSITORY https://github.com/jermp/pthash.git
     GIT_TAG master
+    SOURCE_SUBDIR _skip_add_subdirectory
 )
-FetchContent_Populate(pthash)
+FetchContent_MakeAvailable(pthash)
 
 # Create our own target to avoid pthash's INTERFACE compile options
 # (e.g. -march=native, -ggdb, -Wall) from propagating to our targets.

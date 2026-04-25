@@ -100,7 +100,7 @@ if(PH_BUILD_BENCHMARKS)
 endif()
 
 # Examples (requires C++26 reflection support)
-option(PH_BUILD_EXAMPLES "Build examples (requires C++26 -freflection)" OFF)
+option(PH_BUILD_EXAMPLES "Build examples (requires C++26 -freflection)" ON)
 if(PH_BUILD_EXAMPLES)
     add_subdirectory(examples/reflect)
 endif()
