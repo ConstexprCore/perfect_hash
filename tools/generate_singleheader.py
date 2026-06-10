@@ -11,6 +11,7 @@ COMMENTED_INCLUDES = {
     "#include <ConstexprCore/detail/gperf_generator.h>",
     "#include <ConstexprCore/detail/neon_compare.h>",
     "#include <ConstexprCore/detail/sse2_compare.h>",
+    "#include <ConstexprCore/detail/lsx_compare.h>",
 }
 
 
@@ -44,6 +45,7 @@ def main() -> int:
     parser.add_argument("--gperf-generator", required=True)
     parser.add_argument("--neon-compare", required=True)
     parser.add_argument("--sse2-compare", required=True)
+    parser.add_argument("--lsx-compare", required=True)
     parser.add_argument("--perfect-hash", required=True)
     args = parser.parse_args()
 
@@ -53,6 +55,7 @@ def main() -> int:
         ("detail/gperf_generator.h", Path(args.gperf_generator), False),
         ("detail/neon_compare.h", Path(args.neon_compare), False),
         ("detail/sse2_compare.h", Path(args.sse2_compare), False),
+        ("detail/lsx_compare.h", Path(args.lsx_compare), False),
         ("perfect_hash.h", Path(args.perfect_hash), True),
     ]
 
