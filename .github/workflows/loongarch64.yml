@@ -44,8 +44,8 @@ jobs:
 
       - name: Configure
         run: |
-          cmake -B build \
-            -DCMAKE_TOOLCHAIN_FILE=cmake/toolchains/loongarch64.cmake \
+          cmake -B build -G Ninja \
+            -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/cmake/toolchains/loongarch64.cmake \
             -DCMAKE_BUILD_TYPE=Release \
             -DPH_BUILD_BENCHMARKS=OFF \
             -DPH_BUILD_EXAMPLES=OFF
