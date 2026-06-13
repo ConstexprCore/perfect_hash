@@ -18,11 +18,13 @@ set(version 14)
 set(CMAKE_C_COMPILER   "${target}-gcc-${version}")
 set(CMAKE_CXX_COMPILER "${target}-g++-${version}")
 
-# Ubuntu cross packages install the target sysroot under /usr/<target>.
-# Point CMake at it so it can find the correct headers and libraries.
-set(CMAKE_SYSROOT /usr/${target})
+# NOTE: do *not* set CMAKE_SYSROOT here. The Ubuntu cross GCC is already
+# configured to find the target headers/libraries under /usr/<target>, and
+# passing --sysroot makes ld re-root the absolute paths inside the libc.so
+# linker script, producing "cannot find .../libc.so.6 inside <sysroot>"
+# link failures. The compiler driver handles this correctly on its own.
 
-# Search the target sysroot for libraries, headers and packages.
+# Search the target tree for libraries, headers and packages.
 # Never search the sysroot for host build tools (cmake, ninja, etc.).
 set(CMAKE_FIND_ROOT_PATH /usr/${target})
 set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
