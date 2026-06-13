@@ -31,8 +31,11 @@ jobs:
             os: macos-15
 
           # ── MSVC 2022 · Windows x64 ──────────────────────────────────────
+          # Pin to windows-2022 for stable Visual Studio 2022 availability.
+          # The configure step below deliberately omits -G so CMake auto-selects
+          # the best matching generator present on the runner image.
           - name: MSVC 2022 · Windows
-            os: windows-latest
+            os: windows-2022
 
     steps:
       - uses: actions/checkout@v4
@@ -67,7 +70,9 @@ jobs:
 
       - name: Configure (Windows)
         if: runner.os == 'Windows'
-        run: cmake -B build -G "Visual Studio 17 2022" -A x64 -DPH_BUILD_BENCHMARKS=OFF
+        # Omit explicit -G so CMake auto-detects the installed Visual Studio on the runner image.
+        # This is more robust across GitHub-hosted Windows images (windows-2022 / windows-latest).
+        run: cmake -B build -A x64 -DPH_BUILD_BENCHMARKS=OFF
 
       # ── Build ─────────────────────────────────────────────────────────────
       - name: Build

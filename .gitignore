@@ -13,6 +13,8 @@ compile_commands.json
 _deps/
 *.cmake
 !CMakeLists.txt
+# Toolchain files are real sources, not CMake-generated output.
+!cmake/toolchains/*.cmake
 
 # Compiled objects
 *.o

@@ -54,6 +54,7 @@ if(Python3_Interpreter_FOUND)
             --gperf-generator "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/detail/gperf_generator.h"
             --neon-compare "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/detail/neon_compare.h"
             --sse2-compare "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/detail/sse2_compare.h"
+            --lsx-compare "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/detail/lsx_compare.h"
             --perfect-hash "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/perfect_hash.h"
         DEPENDS
             "${PH_SINGLEHEADER_GENERATOR}"
@@ -61,6 +62,7 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/detail/gperf_generator.h"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/detail/neon_compare.h"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/detail/sse2_compare.h"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/detail/lsx_compare.h"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/perfect_hash.h"
         VERBATIM
         COMMENT "Generating single-header perfect_hash.h"

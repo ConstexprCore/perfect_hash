@@ -22,12 +22,21 @@
 // SIMD comparison helpers (separate headers to avoid polluting consteval)
 #include <ConstexprCore/detail/neon_compare.h>
 #include <ConstexprCore/detail/sse2_compare.h>
+#include <ConstexprCore/detail/lsx_compare.h>
 
 #ifndef CONSTEXPRCORE_USE_NEON_FOR_32_BYTE_COMPARE
 #if defined(__clang__) && CONSTEXPRCORE_HAS_NEON
 #define CONSTEXPRCORE_USE_NEON_FOR_32_BYTE_COMPARE 1
 #else
 #define CONSTEXPRCORE_USE_NEON_FOR_32_BYTE_COMPARE 0
+#endif
+#endif
+
+#ifndef CONSTEXPRCORE_USE_LSX_FOR_32_BYTE_COMPARE
+#if CONSTEXPRCORE_HAS_LSX
+#define CONSTEXPRCORE_USE_LSX_FOR_32_BYTE_COMPARE 1
+#else
+#define CONSTEXPRCORE_USE_LSX_FOR_32_BYTE_COMPARE 0
 #endif
 #endif
 
@@ -61,7 +70,7 @@ struct perfect_hash_set {
     std::array<std::uint8_t, detail::MAX_POSITIONS> positions_{};
     std::uint8_t min_key_len_{};
     std::array<std::uint8_t, TableSize> slot_key_len_{};                    // key length (0xFF = empty)
-#if CONSTEXPRCORE_HAS_NEON || CONSTEXPRCORE_HAS_SSE2
+#if CONSTEXPRCORE_HAS_NEON || CONSTEXPRCORE_HAS_SSE2 || CONSTEXPRCORE_HAS_LSX
     std::array<std::array<char, (MaxKeyLen + 15)/16 * 16>, TableSize> slot_key_data_{};    // inline key bytes
 #else
     std::array<std::array<char, MaxKeyLen>, TableSize> slot_key_data_{};    // inline key bytes
@@ -349,6 +358,9 @@ struct perfect_hash_set {
 #elif CONSTEXPRCORE_HAS_SSE2
                 // x86-64 SSE2: page-safe 16-byte load + AND masking + uint64 extract.
                 return detail::sse2_compare_8(p, len, packed_keys_[slot]);
+#elif CONSTEXPRCORE_HAS_LSX
+                // LoongArch LSX: page-safe 16-byte load + AND masking + uint64 extract.
+                return detail::lsx_compare_8(p, len, packed_keys_[slot]);
 #else
                 // Branchless safe_byte pack: packs all key bytes into uint64.
                 // Zero branch misses since safe_byte_ uses conditional arithmetic.
@@ -362,6 +374,9 @@ struct perfect_hash_set {
 #elif CONSTEXPRCORE_HAS_SSE2
                 // x86-64 SSE2: page-safe 16-byte load + AND masking + pcmpeqb/pmovmskb.
                 return detail::sse2_compare_16(p, len, slot_key_data_[slot].data());
+#elif CONSTEXPRCORE_HAS_LSX
+                // LoongArch LSX: page-safe 16-byte load + AND masking + vseq.b/vmskltz.b.
+                return detail::lsx_compare_16(p, len, slot_key_data_[slot].data());
 #elif defined(__clang__)
                 // Scalar fallback: two packed uint64 words, fully branchless.
                 std::uint64_t input_val;
@@ -394,6 +409,9 @@ struct perfect_hash_set {
 #elif CONSTEXPRCORE_HAS_SSE2 && CONSTEXPRCORE_USE_SSE2_FOR_32_BYTE_COMPARE
                 // x86-64 SSE2: two-pass 16-byte comparison for MaxKeyLen 17-32.
                 return detail::sse2_compare_32(p, len, slot_key_data_[slot].data());
+#elif CONSTEXPRCORE_HAS_LSX && CONSTEXPRCORE_USE_LSX_FOR_32_BYTE_COMPARE
+                // LoongArch LSX: two-pass 16-byte comparison for MaxKeyLen 17-32.
+                return detail::lsx_compare_32(p, len, slot_key_data_[slot].data());
 #elif defined(__clang__)
                 // Scalar fallback: first 8 bytes packed, then byte loop.
                 std::uint64_t input_val;

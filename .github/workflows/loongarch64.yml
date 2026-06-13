@@ -1,0 +1,57 @@
+name: LoongArch64 CI (LSX)
+
+# Cross-compiles for LoongArch64 with GCC 14 and runs the test suite under
+# QEMU user emulation (CPU la464, which provides LSX). This exercises the
+# CONSTEXPRCORE_HAS_LSX comparison path in include/ConstexprCore/detail/lsx_compare.h.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  loongarch64:
+    name: LoongArch64 · GCC 14 · LSX (QEMU la464)
+    runs-on: ubuntu-24.04
+    env:
+      # Set globally so QEMU works both for doctest's build-time test discovery
+      # (a POST_BUILD step run through the emulator) and for the ctest run.
+      QEMU_LD_PREFIX: /usr/loongarch64-linux-gnu
+      QEMU_CPU: la464
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── HTTPS credentials for private dependency: ConstexprCore/useful_abstractions ─
+      - name: Configure git credentials
+        run: git config --global url."https://x-access-token:${{ secrets.USEFUL_ABSTRACTIONS_PAT }}@github.com/".insteadOf "https://github.com/"
+
+      - name: Install build requirements
+        run: |
+          sudo apt-get update -q -y
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build curl python3 \
+            g++-14-loongarch64-linux-gnu \
+            gcc-14-loongarch64-linux-gnu \
+            gcc-14-loongarch64-linux-gnu-base make
+
+      # qemu > 9.2 is needed for reliable LoongArch LSX/LASX user emulation.
+      - name: Download LoongArch64 qemu-10.0.2
+        run: |
+          sudo curl -L https://github.com/loongson/build-tools/releases/download/2025.06.06/qemu-loongarch64 \
+            --output /usr/local/bin/qemu-loongarch64
+          sudo chmod +x /usr/local/bin/qemu-loongarch64
+
+      - name: Configure
+        run: |
+          cmake -B build  \
+            -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/cmake/toolchains/loongarch64.cmake \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DPH_BUILD_BENCHMARKS=OFF \
+            -DPH_BUILD_EXAMPLES=OFF
+
+      - name: Build
+        run: cmake --build build -j$(nproc)
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure -j$(nproc)
