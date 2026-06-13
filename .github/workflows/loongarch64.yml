@@ -33,7 +33,7 @@ jobs:
             cmake ninja-build curl python3 \
             g++-14-loongarch64-linux-gnu \
             gcc-14-loongarch64-linux-gnu \
-            gcc-14-loongarch64-linux-gnu-base
+            gcc-14-loongarch64-linux-gnu-base make
 
       # qemu > 9.2 is needed for reliable LoongArch LSX/LASX user emulation.
       - name: Download LoongArch64 qemu-10.0.2
