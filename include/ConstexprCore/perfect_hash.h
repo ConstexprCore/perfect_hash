@@ -58,17 +58,21 @@ struct perfect_hash_set {
 
     static constexpr std::uint8_t POS_LAST_CHAR = 255;
     static constexpr std::uint8_t HD_MODE = 0xFF; // num_positions_ sentinel for Hash-and-Displace mode
+    static constexpr std::uint8_t FULLHASH_MODE = 0xFE; // num_positions_ sentinel for seeded whole-key-hash mode
     static constexpr bool TABLE_SIZE_IS_POW2 = (TableSize & (TableSize - 1)) == 0;
 
-    // HD_MODE must not collide with a valid num_positions value.
+    // Mode sentinels must not collide with a valid num_positions value.
     static_assert(detail::MAX_POSITIONS < HD_MODE,
                   "MAX_POSITIONS must be < 0xFF to avoid collision with HD_MODE sentinel");
+    static_assert(detail::MAX_POSITIONS < FULLHASH_MODE,
+                  "MAX_POSITIONS must be < 0xFE to avoid collision with FULLHASH_MODE sentinel");
 
     // --- hot data (accessed every lookup) ---
     std::array<std::array<std::uint8_t, 256>, detail::MAX_POSITIONS> asso_values_{};
     std::uint8_t num_positions_{};
     std::array<std::uint8_t, detail::MAX_POSITIONS> positions_{};
     std::uint8_t min_key_len_{};
+    std::uint64_t hash_seed_{};   // FULLHASH_MODE only: seed of the whole-key hash
     std::array<std::uint8_t, TableSize> slot_key_len_{};                    // key length (0xFF = empty)
 #if CONSTEXPRCORE_HAS_NEON || CONSTEXPRCORE_HAS_SSE2 || CONSTEXPRCORE_HAS_LSX
     std::array<std::array<char, (MaxKeyLen + 15)/16 * 16>, TableSize> slot_key_data_{};    // inline key bytes
@@ -203,9 +207,9 @@ struct perfect_hash_set {
         }
 
         // For gperf mode: reduce asso_values mod TableSize (values can be large from bumping).
-        // For H&D mode (num_positions == 0xFF): store raw displacement values (already < 255).
-        if (data.num_positions == 0xFF) {
-            // H&D mode: only one displacement table in asso_values[0]
+        // For H&D / seeded-fullhash modes: store raw displacement values (already < 256).
+        if (data.num_positions == 0xFF || data.num_positions == detail::FULLHASH_SENTINEL) {
+            // Displacement modes: only one table in asso_values[0]
             for (std::size_t i = 0; i < 256; ++i)
                 asso_values_[0][i] = static_cast<std::uint8_t>(data.asso_values[0][i]);
         } else {
@@ -215,6 +219,7 @@ struct perfect_hash_set {
                     asso_values_[pi][i] = static_cast<std::uint8_t>(data.asso_values[pi][i] % TableSize);
         }
         num_positions_ = static_cast<std::uint8_t>(data.num_positions);
+        hash_seed_ = data.seed;
         // Copy positions. For H&D mode (num_positions == 0xFF), only copy
         // the 2 positions used by the bucket hash, not all 255.
         std::size_t pos_count = data.num_positions < detail::MAX_POSITIONS
@@ -240,9 +245,15 @@ struct perfect_hash_set {
     [[nodiscard]] constexpr std::size_t table_size() const noexcept { return TableSize; }
 
     [[nodiscard]] constexpr std::string_view algorithm_name() const noexcept {
-        return num_positions_ == HD_MODE ? std::string_view("H&D") : std::string_view("gperf");
+        return num_positions_ == HD_MODE ? std::string_view("H&D")
+             : num_positions_ == FULLHASH_MODE ? std::string_view("seeded-fullhash")
+             : std::string_view("gperf");
     }
     [[nodiscard]] constexpr std::string algorithm_description() const noexcept {
+        if (num_positions_ == FULLHASH_MODE) {
+            return "seeded-fullhash: h = fh_hash(key, " + std::to_string(hash_seed_) +
+                   "); slot = (asso_values[0][h >> 48 & 0xFF] + h) % " + std::to_string(table_size());
+        }
         if (num_positions_ == HD_MODE) {
             return "Hash-and-Displace: bucket = (key[0] + key[last] + len) & 0xFF; slot = (asso_values[0][bucket] + hd_key_hash(key)) % " + std::to_string(table_size());
         } else {
@@ -485,7 +496,21 @@ struct perfect_hash_set {
     }
 
     [[nodiscard]] constexpr constexprcore_really_inline std::size_t compute_hash(std::string_view key) const noexcept {
-        if (num_positions_ == HD_MODE) {
+        // Single gate for both displacement modes (0xFE fullhash / 0xFF H&D):
+        // normal gperf-mode lookups keep exactly one never-taken branch here.
+        if (num_positions_ >= FULLHASH_MODE) {
+            if (num_positions_ == FULLHASH_MODE) {
+                // Tier-3 mode: seeded whole-key hash + displacement. The hash
+                // reads every byte (8 at a time) — the slow-but-always-works path.
+                const std::uint64_t h = detail::fh_hash(key, hash_seed_);
+                const std::size_t bucket = static_cast<std::size_t>((h >> 48) & 0xFF);
+                const std::size_t s = asso_values_[0][bucket] + static_cast<std::size_t>(h);
+                if constexpr (TABLE_SIZE_IS_POW2)
+                    return s & (TableSize - 1);
+                else
+                    return s % TableSize;
+            }
+            {
             // H&D mode: bucket hash + key hash. positions_[2] selects the key hash variant.
             // The 2-byte variant saves ~10 insn by skipping 2 safe_char rounds.
             std::size_t bucket = detail::hd_bucket_hash(key);
@@ -497,6 +522,7 @@ struct perfect_hash_set {
                 return h & (TableSize - 1);
             else
                 return h % TableSize;
+            }
         }
         // Two hash forms, selected by N:
         //
@@ -693,6 +719,7 @@ template <fixed_string... Keys>
 consteval auto make_perfect_set() {
     constexpr std::size_t N = sizeof...(Keys);
     static_assert(N > 0, "make_perfect_set requires at least one key");
+    static_assert(N <= 255, "perfect_hash supports at most 255 keys (uint8_t indices) — use pthash/absl beyond");
 
     constexpr std::array<std::string_view, N> keys{Keys.view()...};
 
@@ -745,6 +772,7 @@ template <typename... KVs>
 consteval auto make_perfect_map() {
     constexpr std::size_t N = sizeof...(KVs);
     static_assert(N > 0, "make_perfect_map requires at least one entry");
+    static_assert(N <= 255, "perfect_hash supports at most 255 keys (uint8_t indices) — use pthash/absl beyond");
 
     constexpr std::array<std::string_view, N> keys{KVs::key...};
 
