@@ -114,7 +114,19 @@ Every key set with ≤ 255 distinct keys that we could previously fail is now ei
 | vc18 (tier 3, len-20 keys) | *does not build* | **6.19 ns** | 3 hash chunks + NEON-32 verify |
 | protocols6 **forced** through tier 3 | — | **5.88 ns** (contains) | same keys as the 1.60 ns gperf row |
 
-The apples-to-apples row is the one to remember: **the tier-3 tax is ~3.7× on identical keys** — and it is paid *only* by sets that previously did not compile at all. Rescued sets land at ~6 ns: squarely in the territory of the best competitor PHFs on this machine (kronuz/gperf ≈ 5–8 ns), still ~2× faster than `std::unordered_map`, still zero collisions, still branchless SIMD verification, still `.rodata`. Nobody trades down; some sets trade "nothing" for "6 ns."
+**The six-way ladder, same keys, same harness, quiet machine** (protocols6, `contains` unless noted — the definitive comparison):
+
+| Approach | ns/lookup | vs tier 1 | vs `unordered_map` |
+|---|---|---|---|
+| tier 1 · gperf | **0.900** (1.020 lookup) | 1× | **10.5×** faster |
+| tier 2 · H&D (forced) | **1.343** | 1.49× slower | **7.0×** faster |
+| tier 3 · seeded-fullhash (forced) | **5.206** | 5.8× slower | **1.8×** faster |
+| naive if-chain | 6.099 | — | 1.5× faster |
+| `std::unordered_map` | 9.414 | — | 1× |
+
+Every tier of the cascade beats `std::unordered_map` — and the worst-case rescue tier beats even the naive if-chain on a six-key set.
+
+The apples-to-apples rows are the ones to remember: **the tier-3 tax is ~5-6× on identical keys** — and it is paid *only* by sets that previously did not compile at all. Rescued sets land at ~6 ns: squarely in the territory of the best competitor PHFs on this machine (kronuz/gperf ≈ 5–8 ns), still ~2× faster than `std::unordered_map`, still zero collisions, still branchless SIMD verification, still `.rodata`. Nobody trades down; some sets trade "nothing" for "6 ns."
 
 Cost decomposition: the ~4.3 ns delta is almost entirely the serial multiply chain of `fh_hash` (seed-mix + per-chunk fold + finalizer ≈ 6 dependent multiplies). There is headroom here — see §6.
 
