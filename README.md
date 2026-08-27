@@ -3,7 +3,7 @@
 
 
 
-Compile-time perfect hashing for C++. Build zero-collision hash sets and maps entirely at compile time — only flat arrays survive to runtime. Optimized for speed ! 
+Compile-time perfect hashing for C++. Build zero-collision hash sets and maps entirely at compile time. Optimized for speed ! 
 
 
    * [Ridiculously fast](#ridiculously-fast)
