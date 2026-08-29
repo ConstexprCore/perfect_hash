@@ -32,7 +32,9 @@ FetchContent_MakeAvailable(frozen)
 FetchContent_Declare(
     constexpr_phf
     GIT_REPOSITORY https://github.com/Kronuz/constexpr-phf.git
-    GIT_TAG master
+    # Pinned: upstream master was rewritten on 2026-08 ("slim repo to the
+    # integer engine"), dropping hashes.hh/fnv1ah32 that the benches use.
+    GIT_TAG 0776e93
     SOURCE_SUBDIR _skip_add_subdirectory
 )
 FetchContent_MakeAvailable(constexpr_phf)
@@ -77,6 +79,30 @@ target_link_libraries(bench_protocol PRIVATE
     absl::flat_hash_map
     frozen::frozen
 )
+
+# Ticker benchmarks (N > 255): S&P 500 + all Nasdaq-listed symbols, wide mode.
+# Separate TU: the 5581-key consteval build is the long pole of the build.
+add_executable(bench_tickers
+    bench_tickers.cpp
+    pthash_wrapper.cpp
+)
+target_include_directories(bench_tickers PRIVATE
+    ${constexpr_phf_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/data
+)
+target_link_libraries(bench_tickers PRIVATE
+    ConstexprCore::perfect_hash
+    counters::counters
+    unordered_dense::unordered_dense
+    pthash_headers
+    absl::flat_hash_map
+    frozen::frozen
+)
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(bench_tickers PRIVATE -fconstexpr-steps=4294967295 -fbracket-depth=1024)
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(bench_tickers PRIVATE -fconstexpr-ops-limit=4294967295 -fconstexpr-loop-limit=2147483647)
+endif()
 
 add_executable(simd_experiments ../perf_viz/simd_experiments.cpp)
 target_link_libraries(simd_experiments PRIVATE
