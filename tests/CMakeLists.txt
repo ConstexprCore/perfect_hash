@@ -14,6 +14,7 @@ add_executable(phf_tests
     test_url_protocols.cpp
     test_http_methods.cpp
     test_edge_cases.cpp
+    test_wide.cpp
 )
 
 target_link_libraries(phf_tests PRIVATE

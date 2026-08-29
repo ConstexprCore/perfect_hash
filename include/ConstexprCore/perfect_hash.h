@@ -23,6 +23,25 @@
 #include <ConstexprCore/detail/neon_compare.h>
 #include <ConstexprCore/detail/sse2_compare.h>
 #include <ConstexprCore/detail/lsx_compare.h>
+#include <ConstexprCore/detail/simd16.h>
+#include <ConstexprCore/wide_perfect_hash.h>
+
+// MaxKeyLen > 32: fixed-count 16-byte SIMD chunk comparison (branchless in the
+// key length) instead of the scalar byte loop. On by default wherever a SIMD
+// chunk implementation exists; define to 0 to get the old scalar path back.
+#ifndef CONSTEXPRCORE_USE_SIMD_CHUNKS_FOR_LONG_KEYS
+#if CONSTEXPRCORE_HAS_NEON || CONSTEXPRCORE_HAS_SSE2 || CONSTEXPRCORE_HAS_LSX
+#define CONSTEXPRCORE_USE_SIMD_CHUNKS_FOR_LONG_KEYS 1
+#else
+#define CONSTEXPRCORE_USE_SIMD_CHUNKS_FOR_LONG_KEYS 0
+#endif
+#endif
+
+// MaxKeyLen 17-32: use the shared single-guard chunk compare (default) instead
+// of the per-ISA two-guard *_compare_32 helpers. Define to 0 to compare.
+#ifndef CONSTEXPRCORE_USE_SIMD_CHUNKS_FOR_32
+#define CONSTEXPRCORE_USE_SIMD_CHUNKS_FOR_32 1
+#endif
 
 #ifndef CONSTEXPRCORE_USE_NEON_FOR_32_BYTE_COMPARE
 #if defined(__clang__) && CONSTEXPRCORE_HAS_NEON
@@ -408,12 +427,11 @@ struct perfect_hash_set {
                 return std::equal(p, p + len, slot_key_data_[slot].data());
 #endif
             } else if constexpr (MaxKeyLen <= 32) {
-///////////////
-// We disallowed MaxKeyLen > 32 for SIMD-optimized paths since they are not necessarily faster.
-// Set the macros CONSTEXPRCORE_USE_NEON_FOR_32_BYTE_COMPARE and CONSTEXPRCORE_USE_SSE2_FOR_32_BYTE_COMPARE 
-// to enable these paths if desired.
-//////////////
-#if CONSTEXPRCORE_HAS_NEON && CONSTEXPRCORE_USE_NEON_FOR_32_BYTE_COMPARE
+#if CONSTEXPRCORE_USE_SIMD_CHUNKS_FOR_LONG_KEYS && CONSTEXPRCORE_USE_SIMD_CHUNKS_FOR_32
+                // 17-32 bytes: two chunks behind ONE page guard (the per-ISA
+                // *_compare_32 helpers below guard each chunk separately).
+                return detail::compare_chunks<MaxKeyLen>(p, len, slot_key_data_[slot].data());
+#elif CONSTEXPRCORE_HAS_NEON && CONSTEXPRCORE_USE_NEON_FOR_32_BYTE_COMPARE
                 // ARM64 NEON: two-pass 16-byte comparison for MaxKeyLen 17-32.
                 // Replaces pack_input_ + byte loop (~120 insn) with ~10 NEON insn.
                 return detail::neon_compare_32(p, len, slot_key_data_[slot].data());
@@ -447,7 +465,11 @@ struct perfect_hash_set {
                 return std::equal(p, p + len, slot_key_data_[slot].data());
 #endif
             } else {
-#ifdef __clang__
+#if CONSTEXPRCORE_USE_SIMD_CHUNKS_FOR_LONG_KEYS
+                // MaxKeyLen > 32: ceil(MaxKeyLen/16) page-safe masked 16-byte
+                // loads + compares, AND-reduced once. No branch on len.
+                return detail::compare_chunks<MaxKeyLen>(p, len, slot_key_data_[slot].data());
+#elif defined(__clang__)
                 // MaxKeyLen > 32: first 8 bytes packed, then byte loop.
                 std::uint64_t input_val;
                 if consteval {
@@ -715,12 +737,25 @@ struct kv {
 // make_perfect_set
 // ============================================================================
 
+// Static-storage key/value arrays for a pack of fixed_strings / kv pairs, so
+// the wide (N > 255) factories can take them as reference template arguments.
+namespace detail {
+template <fixed_string... Keys>
+inline constexpr std::array<std::string_view, sizeof...(Keys)> keys_of_v{Keys.view()...};
+template <typename... KVs>
+inline constexpr std::array<std::string_view, sizeof...(KVs)> kv_keys_v{KVs::key...};
+template <typename ValueT, typename... KVs>
+inline constexpr std::array<ValueT, sizeof...(KVs)> kv_values_v{static_cast<ValueT>(KVs::value)...};
+} // namespace detail
+
 template <fixed_string... Keys>
 consteval auto make_perfect_set() {
     constexpr std::size_t N = sizeof...(Keys);
     static_assert(N > 0, "make_perfect_set requires at least one key");
-    static_assert(N <= 255, "perfect_hash supports at most 255 keys (uint8_t indices) — use pthash/absl beyond");
-
+    if constexpr (N > 255) {
+        // Beyond the byte-indexed design: whole-key hash + pilot table (wide mode).
+        return make_wide_perfect_set<detail::keys_of_v<Keys...>>();
+    } else {
     constexpr std::array<std::string_view, N> keys{Keys.view()...};
 
     // Validate no duplicates
@@ -737,6 +772,7 @@ consteval auto make_perfect_set() {
     constexpr std::size_t M = data.table_size;
     constexpr std::size_t MaxLen = detail::max_key_length(keys) > 0 ? detail::max_key_length(keys) : 1;
     return perfect_hash_set<N, M, MaxLen>{keys, data};
+    }
 }
 
 // ============================================================================
@@ -772,8 +808,12 @@ template <typename... KVs>
 consteval auto make_perfect_map() {
     constexpr std::size_t N = sizeof...(KVs);
     static_assert(N > 0, "make_perfect_map requires at least one entry");
-    static_assert(N <= 255, "perfect_hash supports at most 255 keys (uint8_t indices) — use pthash/absl beyond");
-
+    using first_kv = typename std::tuple_element<0, std::tuple<KVs...>>::type;
+    using ValueT = decltype(first_kv::value);
+    if constexpr (N > 255) {
+        // Beyond the byte-indexed design: whole-key hash + pilot table (wide mode).
+        return make_wide_perfect_map<detail::kv_keys_v<KVs...>, detail::kv_values_v<ValueT, KVs...>>();
+    } else {
     constexpr std::array<std::string_view, N> keys{KVs::key...};
 
     // Validate no duplicates
@@ -785,9 +825,6 @@ consteval auto make_perfect_map() {
         }
     }
 
-    using first_kv = typename std::tuple_element<0, std::tuple<KVs...>>::type;
-    using ValueT = decltype(first_kv::value);
-
     constexpr std::array<ValueT, N> values{static_cast<ValueT>(KVs::value)...};
 
     // Compute PHF once (determines table size + all data)
@@ -795,6 +832,7 @@ consteval auto make_perfect_map() {
     constexpr std::size_t M = data.table_size;
     constexpr std::size_t MaxLen = detail::max_key_length(keys) > 0 ? detail::max_key_length(keys) : 1;
     return perfect_hash_map<N, ValueT, M, MaxLen>{keys, values, data};
+    }
 }
 
 } // namespace ConstexprCore
