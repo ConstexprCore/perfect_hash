@@ -565,7 +565,12 @@ struct perfect_hash_set {
         // mispredicts) vs jsreserved (45 keys, does not) vs headers50
         // (50 keys, does not) benchmarks under gcc on x86-64.
         std::size_t h = key.size();
-        if constexpr (N >= 64) {
+        // Branchless mask form when the per-position OOB branches are likely
+        // to be data-dependent: large N exhausts the predictor (TAGE) on
+        // shuffled streams, and long-key sets (MaxKeyLen > 16) tend to select
+        // positions beyond the shortest keys (e.g. Counters: position 8 vs
+        // 6-8-byte keys -> 0.31+ misses/lookup on the branchy form).
+        if constexpr (N >= 64 || MaxKeyLen > 16) {
             const char* kp = key.data();
             const std::size_t klen = key.size();
             for (std::uint8_t i = 0; i < num_positions_; ++i) {
@@ -748,12 +753,28 @@ template <typename ValueT, typename... KVs>
 inline constexpr std::array<ValueT, sizeof...(KVs)> kv_values_v{static_cast<ValueT>(KVs::value)...};
 } // namespace detail
 
+// Container choice, measured in the full benchmark harness (M3 Max, hits):
+//   MaxKeyLen == 1          -> classic (direct 256-entry byte table, ~0.5 ns)
+//   MaxKeyLen 2..7, N >= 8  -> wide    (one 64-bit lane holds key+length, so
+//                              the compare IS the hash input: S&P 100
+//                              1.77 -> 1.32 ns, C++ keywords 1.42 -> 1.32)
+//   tiny N (< 8)            -> classic (fully-predicted branchy hash + a
+//                              one-cache-line table still win: URL protocols
+//                              1.27 classic vs 1.33 wide at N = 6)
+//   MaxKeyLen >= 8          -> classic (two-lane extraction + two multiplies
+//                              lose to 1-2 chosen positions + one vector
+//                              compare: HTTP headers 1.33 classic vs 1.75 wide)
+//   N > 255                 -> wide    (byte-indexed design ends at 255)
+constexpr bool prefer_wide_container(std::size_t n, std::size_t max_len) noexcept {
+    return n > 255 || (n >= 8 && max_len >= 2 && max_len <= 7);
+}
+
 template <fixed_string... Keys>
 consteval auto make_perfect_set() {
     constexpr std::size_t N = sizeof...(Keys);
     static_assert(N > 0, "make_perfect_set requires at least one key");
-    if constexpr (N > 255) {
-        // Beyond the byte-indexed design: whole-key hash + pilot table (wide mode).
+    constexpr std::size_t MaxLen0 = detail::max_key_length(detail::keys_of_v<Keys...>);
+    if constexpr (prefer_wide_container(N, MaxLen0)) {
         return make_wide_perfect_set<detail::keys_of_v<Keys...>>();
     } else {
     constexpr std::array<std::string_view, N> keys{Keys.view()...};
@@ -810,8 +831,9 @@ consteval auto make_perfect_map() {
     static_assert(N > 0, "make_perfect_map requires at least one entry");
     using first_kv = typename std::tuple_element<0, std::tuple<KVs...>>::type;
     using ValueT = decltype(first_kv::value);
-    if constexpr (N > 255) {
-        // Beyond the byte-indexed design: whole-key hash + pilot table (wide mode).
+    constexpr std::size_t MaxLen0 = detail::max_key_length(detail::kv_keys_v<KVs...>);
+    if constexpr (prefer_wide_container(N, MaxLen0)) {
+        // See prefer_wide_container above.
         return make_wide_perfect_map<detail::kv_keys_v<KVs...>, detail::kv_values_v<ValueT, KVs...>>();
     } else {
     constexpr std::array<std::string_view, N> keys{KVs::key...};

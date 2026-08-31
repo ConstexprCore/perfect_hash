@@ -63,10 +63,13 @@ struct wide_perfect_hash_set {
     //     before the indexed load) ---
     std::array<pilot_t, B> pilots_{};
     // ≤15-byte keys: the lanes themselves (length folded in) — an ldp + 2 xor
-    // verifies the key. Longer keys: inline bytes, 16-byte padded, + length.
+    // verifies the key. Stored as BYTES in little-endian lane layout (bit-
+    // identical to the u64 lanes): runtime loads them as u64, while key_at
+    // and the consteval paths read the chars directly, keeping the whole map
+    // usable in constant expressions. Longer keys: 16-byte-padded bytes + length.
     struct no_storage_t {};
     [[no_unique_address]] std::conditional_t<LANE_COMPARE,
-        std::array<std::array<std::uint64_t, L>, TableSize>, no_storage_t> packed_lanes_{};
+        std::array<std::array<char, L * 8>, TableSize>, no_storage_t> packed_bytes_{};
     [[no_unique_address]] std::conditional_t<!LANE_COMPARE,
         std::array<std::array<char, CHUNKS * 16>, TableSize>, no_storage_t> slot_key_data_{};
     [[no_unique_address]] std::conditional_t<!LANE_COMPARE,
@@ -98,7 +101,10 @@ struct wide_perfect_hash_set {
             const std::string_view k = keys[ki];
             key_to_slot_[ki] = static_cast<index_t>(s);
             if constexpr (LANE_COMPARE) {
-                packed_lanes_[s] = detail::wide_key_lanes<MaxKeyLen>(k);
+                const auto lanes = detail::wide_key_lanes<MaxKeyLen>(k);
+                for (std::size_t j = 0; j < L; ++j)
+                    for (std::size_t b = 0; b < 8; ++b)
+                        packed_bytes_[s][8 * j + b] = static_cast<char>((lanes[j] >> (8 * b)) & 0xFF);
             } else {
                 for (std::size_t c = 0; c < k.size(); ++c) slot_key_data_[s][c] = k[c];
                 slot_key_len_[s] = static_cast<std::uint16_t>(k.size());
@@ -124,16 +130,27 @@ struct wide_perfect_hash_set {
                ") + pilot[bucket]) & " + std::to_string(TableSize - 1) +
                (LANE_COMPARE ? "; verify = packed lanes" : "; verify = 16B chunks + len");
     }
-    // key_at: when the lanes are the storage, the key bytes ARE the lanes
-    // (little-endian, length in the top byte of the length lane), so the
-    // view points into packed_lanes_ — no second copy of the keys is kept.
-    // Runtime only for that storage form (reinterpret_cast); the map itself
-    // is fully usable at compile time.
+    // Stored lane j of a slot, assembled at consteval / loaded at runtime.
+    [[nodiscard]] constexpr constexprcore_really_inline std::uint64_t stored_lane_(std::size_t slot, std::size_t j) const noexcept
+        requires LANE_COMPARE {
+        if (std::is_constant_evaluated()) {
+            std::uint64_t v = 0;
+            for (std::size_t b = 0; b < 8; ++b)
+                v |= static_cast<std::uint64_t>(static_cast<unsigned char>(packed_bytes_[slot][8 * j + b])) << (8 * b);
+            return v;
+        } else {
+            std::uint64_t v;
+            std::memcpy(&v, packed_bytes_[slot].data() + 8 * j, 8);
+            return v;
+        }
+    }
+    // key_at: the key bytes ARE the stored bytes (length in the top byte of
+    // the length lane) — a plain constexpr view, no second copy of the keys.
     [[nodiscard]] constexpr std::string_view key_at(std::size_t i) const noexcept {
         const std::size_t s = key_to_slot_[i];
         if constexpr (LANE_COMPARE) {
-            const std::size_t len = static_cast<std::size_t>(packed_lanes_[s][LEN_LANE] >> 56);
-            return std::string_view(reinterpret_cast<const char*>(packed_lanes_[s].data()), len);
+            const std::size_t len = static_cast<unsigned char>(packed_bytes_[s][8 * LEN_LANE + 7]);
+            return std::string_view(packed_bytes_[s].data(), len);
         } else {
             return std::string_view(slot_key_data_[s].data(), slot_key_len_[s]);
         }
@@ -142,10 +159,12 @@ struct wide_perfect_hash_set {
     // Fused-value plumbing (used by wide_perfect_hash_map when FusedBits > 0).
     consteval void fuse_value_(std::size_t slot, std::uint64_t v) {
         if (v & ~((std::uint64_t{1} << FusedBits) - 1)) throw "wide_perfect_hash_set: fused value out of range";
-        packed_lanes_[slot][LEN_LANE] |= v << SPARE_SHIFT;
+        for (std::size_t b = 0; b < (FusedBits + 7) / 8; ++b)
+            packed_bytes_[slot][8 * LEN_LANE + SPARE_SHIFT / 8 + b] =
+                static_cast<char>((v >> (8 * b)) & 0xFF);
     }
     [[nodiscard]] constexpr constexprcore_really_inline std::uint64_t fused_value_(std::size_t slot) const noexcept {
-        return (packed_lanes_[slot][LEN_LANE] & FUSED_MASK) >> SPARE_SHIFT;
+        return (stored_lane_(slot, LEN_LANE) & FUSED_MASK) >> SPARE_SHIFT;
     }
 
     [[nodiscard]] constexpr constexprcore_really_inline std::size_t slot_of_(std::uint64_t h) const noexcept {
@@ -178,7 +197,7 @@ struct wide_perfect_hash_set {
             if constexpr (LANE_COMPARE) {
                 for (std::size_t i = 0; i < L; ++i) {
                     const std::uint64_t keep = (i == LEN_LANE) ? ~FUSED_MASK : ~std::uint64_t{0};
-                    ok = ok && (((packed_lanes_[slot][i] ^ lanes[i]) & keep) == 0);
+                    ok = ok && (((stored_lane_(slot, i) ^ lanes[i]) & keep) == 0);
                 }
             } else {
                 ok = (slot_key_len_[slot] == len);
@@ -205,8 +224,8 @@ struct wide_perfect_hash_set {
             const std::size_t slot = slot_of_(detail::wide_hash<L, Strong>(lanes, muls_));
             bool ok;
             if constexpr (LANE_COMPARE) {
-                std::uint64_t diff = packed_lanes_[slot][0] ^ lanes[0];
-                if constexpr (L == 2) diff |= packed_lanes_[slot][1] ^ lanes[1];
+                std::uint64_t diff = stored_lane_(slot, 0) ^ lanes[0];
+                if constexpr (L == 2) diff |= stored_lane_(slot, 1) ^ lanes[1];
                 if constexpr (FusedBits > 0) diff &= ~FUSED_MASK;   // one logical-immediate AND
                 ok = (diff == 0);
             } else {
@@ -218,6 +237,13 @@ struct wide_perfect_hash_set {
         }
     }
 
+    // Branch-free probe: always returns a valid slot index plus a hit flag,
+    // so callers can turn "found?" into a csel instead of a branch.
+    struct probe_result { std::size_t slot; bool hit; };
+    [[nodiscard]] constexpr constexprcore_really_inline probe_result slot_probe(std::string_view key) const noexcept {
+        auto s = slot_match(key);
+        return { s.value_or(0), s.has_value() };
+    }
     [[nodiscard]] constexpr constexprcore_really_inline bool contains(std::string_view key) const noexcept {
         return slot_match(key).has_value();
     }
@@ -283,6 +309,20 @@ struct wide_perfect_hash_map {
     [[nodiscard]] constexpr std::string_view key_at(std::size_t i) const noexcept { return set_.key_at(i); }
     [[nodiscard]] constexpr constexprcore_really_inline bool contains(std::string_view key) const noexcept {
         return set_.contains(key);
+    }
+    // Branchless lookup for hits-dominated callers: the value load is
+    // unconditional (the probe slot is always in range) and the miss case is
+    // a conditional select, not a branch.
+    [[nodiscard]] constexpr constexprcore_really_inline value_t lookup_or(std::string_view key, value_t def) const noexcept {
+        const auto pr = set_.slot_probe(key);
+        value_t v;
+        if constexpr (FUSED) {
+            using U = std::make_unsigned_t<value_t>;
+            v = static_cast<value_t>(static_cast<U>(set_.fused_value_(pr.slot)));
+        } else {
+            v = slot_values_[pr.slot];
+        }
+        return pr.hit ? v : def;
     }
     [[nodiscard]] constexpr constexprcore_really_inline std::optional<ValueT> lookup(std::string_view key) const noexcept {
         auto s = set_.slot_match(key);
