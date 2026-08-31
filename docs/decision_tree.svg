@@ -12,7 +12,7 @@
     </style>
   </defs>
   <text x="590" y="28" text-anchor="middle" font-size="19" font-weight="bold" class="t">When to use the compile-time perfect hash — and which mode you get</text>
-  <text x="590" y="47" text-anchor="middle" class="s">numbers: Apple M3 Max, shuffled hits, ns per lookup · francisco/experimental, 2026-08-29</text>
+  <text x="590" y="47" text-anchor="middle" class="s">numbers: Apple M3 Max, shuffled hits, ns per lookup · francisco/experimental, 2026-08-31</text>
 
   <!-- Q1 -->
   <rect x="440" y="70" width="300" height="46" rx="8" class="q"/>
@@ -42,20 +42,20 @@
   <text x="590" y="249" text-anchor="middle" class="t">How many keys?</text>
 
   <!-- left branch: <= 255 -->
-  <path d="M465,244 L330,244 L330,300" class="e"/><text x="345" y="238" class="l">2 … 255</text>
+  <path d="M465,244 L330,244 L330,300" class="e"/><text x="330" y="238" class="l">classic shapes</text>
   <rect x="110" y="300" width="440" height="92" rx="8" class="us"/>
-  <text x="330" y="320" text-anchor="middle" class="t" font-weight="bold">make_perfect_map / make_perfect_set — classic mode</text>
+  <text x="330" y="320" text-anchor="middle" class="t" font-weight="bold">classic mode: N ≤ 255 with keys ≥ 8 B, or tiny sets (N &lt; 8)</text>
   <text x="330" y="338" text-anchor="middle" class="s">hash = len + asso[pos₁][k[pos₁]] (+ …), 1–2 chosen bytes, 4 instructions</text>
   <text x="330" y="354" text-anchor="middle" class="s">tiers picked automatically: gperf → hash-and-displace → seeded whole-key</text>
-  <text x="330" y="370" text-anchor="middle" class="s">1.2–2.1 ns on the talk's 9 sets; 255-key wall = byte-indexed tables</text>
+  <text x="330" y="370" text-anchor="middle" class="s">1.27–2.05 ns; 0.00 branch misses on every set incl. Counters</text>
   <text x="330" y="386" text-anchor="middle" class="s">N ≥ ~50: set -fconstexpr-steps (clang default ≈ 1 M steps)</text>
 
   <!-- right branch: > 255 -->
-  <path d="M715,244 L850,244 L850,300" class="e"/><text x="740" y="238" class="l">256 … 65 535</text>
+  <path d="M715,244 L850,244 L850,300" class="e"/><text x="725" y="238" class="l">wide shapes</text>
   <rect x="630" y="300" width="440" height="92" rx="8" class="us"/>
-  <text x="850" y="320" text-anchor="middle" class="t" font-weight="bold">same call → wide mode (wide_perfect_hash.h)</text>
+  <text x="850" y="320" text-anchor="middle" class="t" font-weight="bold">wide mode: N &gt; 255, or short keys (≤ 7 B) with N ≥ 8</text>
   <text x="850" y="338" text-anchor="middle" class="s">whole-key multiply → bucket → u16 pilot → slot; verified at compile time</text>
-  <text x="850" y="354" text-anchor="middle" class="s">S&amp;P 500: 1.2 ns · all 5 581 Nasdaq symbols: 1.7 ns (36–40 instructions)</text>
+  <text x="850" y="354" text-anchor="middle" class="s">S&amp;P 100 1.32 · S&amp;P 500 1.27 · all 5 581 Nasdaq symbols 1.73 (36–40 instr)</text>
   <text x="850" y="370" text-anchor="middle" class="s">generated lists: make_wide_perfect_index_map&lt;array&gt;() — 5 s compile @ 5 581</text>
   <text x="850" y="386" text-anchor="middle" class="s">beyond 65 535 keys or 4 080-byte keys: pthash / absl at run time</text>
 
@@ -66,8 +66,8 @@
   <text x="115" y="472" class="s">≤ 4 B  → two overlapping halfword loads + length, one 64-bit compare</text>
   <text x="115" y="490" class="s">≤ 8 B  → page-safe 16-B load, tbl mask, one 64-bit compare (tickers: 1.8 ns @100)</text>
   <text x="115" y="508" class="s">≤ 16 B → tbl mask + cmeq, one vector compare (HTTP headers: 1.3 ns)</text>
-  <text x="115" y="526" class="s">17–32 B → 2 chunks, ONE page guard (Headers50: 1.9 ns)</text>
-  <text x="115" y="544" class="s">&gt; 32 B → ⌈L/16⌉ chunks, one guard, no loop (Java FQCNs 54 B: 2.8 ns; was 23 ns)</text>
+  <text x="115" y="526" class="s">17–32 B → 2 chunks, branch-free for any address (Headers50 1.89, Counters 1.85)</text>
+  <text x="115" y="544" class="s">&gt; 32 B → ⌈L/16⌉ chunks, sliding masks, one guard (Java FQCNs 54 B: 2.05 ns; was 23 ns)</text>
 
   <!-- key-length ladder, wide -->
   <path d="M850,392 L850,430" class="e"/>

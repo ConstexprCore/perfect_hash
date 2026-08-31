@@ -417,3 +417,136 @@ that straddle a 4 KiB boundary in the input pool).
 * **LSX path of `simd16.h`**: written to mirror `lsx_compare.h`, compiled nowhere here.
 * **Counters bench for misses/mixed on the classic sets with the new 17–32 path**: only
   hits were re-run (identical time, −2 instructions); no reason to expect a change.
+
+## Day 2 — 2026-08-31: the physical-limits session
+
+Goal set by Francisco: "as close to the physical limits of the hardware from first
+principles as possible." The relevant limits on the M3 Max: ~8.7 sustained retired
+ops/cycle (measured ceiling), 3 loads/cycle, ~0.25 ns/cycle. Every lookup carries ~8
+instructions of harness (load the string_view, loop bookkeeping, the optional check,
+store), so an N-instruction lookup floors at ≈ (N+8)/8.7 cycles — instructions are the
+currency, and branches only matter when they mispredict.
+
+### Win 1 — sliding mask table (every chunk's mask = ONE indexed load)
+
+Chunk *i* of a key of length `len` needs mask row `clamp(len − 16i, 0, 16)` — previously
+two `csel`s plus address arithmetic per chunk. Lay the rows out shifted (zero rows below,
+the 17 transition rows, identity rows above) and row `len + 16(C−1−i)` **is** that row:
+per chunk, one `ldr q, [base_i, len, lsl #4]` with `base_i` loop-invariant.
+
+| | before | after |
+|---|---|---|
+| Java FQCNs (54 B, 4 chunks) | 2.91 ns / 78 i | **2.36 ns / 61 i** |
+| HTTP Headers 50 (19 B, 2 chunks) | 1.90 / 60 | **1.73 / 56** |
+
+### Wash 1 — scalar lane load (recorded, reverted)
+
+For ≤7-byte keys, replacing `ldr q / tbl / fmov` with a scalar `ldr x` + shift-mask:
+identical 36 instructions, identical time on both ticker sets. The vector→GPR move is
+fully hidden by out-of-order overlap at this ILP. Kept the vector path (shared with the
+compare ladder); the experiment lives only in this diary.
+
+### Win 2 — `lookup_or` (branchless miss handling, new API)
+
+`map.lookup_or(key, default)` returns the value through a `csel` instead of an
+`optional` + branch: −2 instructions, same time on hits (the optional's branch was
+perfectly predicted), but gives hits-only callers (the stated use case) a form with **no
+data-dependent branch at all** in the consumer. `slot_probe(key) -> {slot, hit}` is the
+underlying primitive.
+
+### Win 3 — the classic-vs-wide face-off, and a new default dispatch
+
+Instantiating BOTH containers on the same key sets exposed a structural fact: when every
+lane of the key must be loaded for the compare anyway, hashing those lanes costs almost
+nothing extra — gperf-form position hashing only wins when it lets the hash *skip* most
+of the key. Measured in the real harness (hits, ns):
+
+| set | classic | wide | default now |
+|---|---|---|---|
+| URL Protocols (6, ≤5 B) | **1.27** | 1.33 | classic (tiny N: predicted branchy hash + 1-line table) |
+| C++ Keywords (15, ≤6 B) | 1.42 | **1.32** | wide |
+| S&P 100 (100, ≤5 B) | 1.77 | **1.32** | wide |
+| HTTP Headers (20, ≤15 B) | **1.33** | 1.75 | classic (two-lane extract + 2 muls lose) |
+| MIME (15, 16 B) | **1.51** | 2.01 | classic |
+| JS Reserved (45, ≤10 B) | **1.57** | 1.81 | classic |
+| Java FQCNs (40, ≤54 B) | **2.05** | 6.29 | classic (positions skip 6/8 lanes) |
+
+`prefer_wide_container(N, MaxKeyLen)`: wide iff `N > 255` or `(N ≥ 8 && MaxKeyLen ≤ 7)`.
+An early cut of the face-off (with a spill-heavy harness) suggested wide up to 16 bytes;
+the real harness overruled it — recorded here because the *method* matters: only the
+final integrated benchmark decides.
+
+Also required: the wide set now stores its packed lanes as **bytes** (bit-identical
+layout, loaded as u64 at runtime via memcpy → same ldp/ldr codegen) so `key_at` and every
+factory-facing path work in constant expressions — the pre-existing
+`static_assert(set.key_at(0) == ...)` tests forced the issue when the dispatch switched
+real sets to wide.
+
+### Win 4 — branchless hash form for long-key sets
+
+The `N ≥ 64` threshold for the branchless position loads missed the other risk factor: a
+selected position beyond the shortest key makes the OOB branch data-dependent. Now
+`N ≥ 64 || MaxKeyLen > 16`. Java FQCNs (position 26, min len 24): 2.36 → **2.05 ns**,
+bm 0.08 → **0.00**, IPC 8.4. Headers 50 unchanged.
+
+### Win 5 — the Counters forensics, and a branch-free 17–32-byte compare
+
+Counters (10 telemetry keys, 6–21 B) jumped to a *stable* 6.9 ns / 0.75 bm in the full
+bench while the isolated probe showed 1.98 ns / 0.00 bm — same header, same keys. The
+forensics: the bench binary carries a second copy of the literal pool, and it **straddles
+a page boundary** — four of the ten keys sit at page offsets 4068–4092, so the span-32
+page guard fired for ~40 % of lookups in random order: ~0.5 misses/lookup on that branch
+plus `bzero`/`memcpy` calls in the slow path. Nothing was "wrong"; that is simply the
+tail risk of a guarded over-read, made visible by an unlucky (3.7 %-probability) linker
+layout. The slide-14 guard is 99.6 % predictable *for uniformly placed keys* — a
+correlated pool near a page edge breaks the assumption.
+
+The cure removes the branch instead of moving it (NEON/byte-shuffle targets):
+
+* **chunk 1**: load shifted back by `o = max(0, page_off − 4080)` — the window then ends
+  exactly at the page edge and can never fault; a key that genuinely crosses the edge
+  sets `o = 0` (its own bytes prove the next page is mapped). A 2-D `(need, o)` tbl row
+  (17×16 rows, 4.4 KB) shifts the bytes back and zeroes the tail in the same shuffle.
+* **chunk 2**: the overlap trick — bytes `[len−16, len)` are inside the key whenever
+  `len ≥ 16`: a raw load, compared at the same offset of the (zero-padded) stored key,
+  no mask at all; for `len < 16` it re-reads chunk 1's window and its compare is forced
+  true with one `orr` against a broadcast flag.
+
+| Counters in the adversarial binary | ns | instr | bm |
+|---|---|---|---|
+| guarded (before) | 6.89 | 83.5 | 0.75 |
+| **branch-free (after)** | **1.85** | 60.1 | **0.00** |
+| Headers 50 (clean layout, the price) | 1.73 → **1.89** | 56 → 61 | 0.00 → 0.00 |
+
+3.7× on the adversarial case, +0.16 ns on the clean case, and the 17–32-byte path now has
+**zero data-dependent branches for any input address** — including the old Counters
+position-8 bug, which is gone (0.31 → 0.00 bm). C = 1 (≤16 B) and C ≥ 4 keep the guard:
+their bad zone is half as wide, the measured worst case (FQCN, 0.08 bm) was small, and
+the +5-instruction insurance would cost the 1.3 ns headline sets ~12 %. SSE2 has no byte
+shuffle (`pshufb` is SSSE3), so x86 keeps the guarded form (`CONSTEXPRCORE_NO_BRANCHFREE_2CHUNKS`
+gets the guarded form back anywhere).
+
+### Where the suite stands now (hits, ns, fastest-of-300 × 200 K, M3 Max)
+
+| set | session start | now | Δ | bm |
+|---|---|---|---|---|
+| URL Protocols (6) | 1.27 | 1.27 | — | 0.00 |
+| HTTP Headers (20) | 1.33 | 1.33 | — | 0.00 |
+| C++ Keywords (15) | 1.42 | **1.32** | −7 % | 0.00 |
+| MIME (15) | 1.51 | 1.51 | — | 0.00 |
+| JS Reserved (45) | 1.57 | 1.57 | — | 0.00 |
+| Letters a–z (26) | 0.57 | 0.57 | — | 0.00 |
+| S&P 100 (100) | 1.77 | **1.32** | −25 % | 0.00 |
+| HTTP Headers 50 (50) | 1.90 | 1.89 | — | 0.00 |
+| Counters (10) | 3.10–6.9 (layout lottery) | **1.85** | −40…−73 % | **0.00** |
+| Java FQCNs (40) | 2.91 | **2.05** | −30 % | 0.00 |
+| S&P 500 (503) | 1.27 | 1.27 | — | 0.01 |
+| Nasdaq (5 581) | 1.70 | 1.73 | — | 0.00 |
+
+**Every set in the suite now retires 0.00 branch misses per lookup** (Counters included,
+for the first time in the library's history), and every set ≥ 8 keys sits between 1.27
+and 2.05 ns. First principles say the floor for the 40-instruction sets is
+≈ 40/8.7 ≈ 4.6 cycles ≈ 1.14 ns *including harness* — S&P 100/keywords at 5.0 cycles are
+within ~8 % of retire-width-bound, and the ≤16 B classic sets run at IPC 8.7, i.e. **at**
+the machine's sustained retire ceiling; further gains there require removing instructions
+that no longer exist to remove, or raising the clock.

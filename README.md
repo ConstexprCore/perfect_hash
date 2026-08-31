@@ -111,9 +111,11 @@ benchmarks' `CMakeLists.txt` does.
 ### Long keys (more than 32 bytes)
 
 Keys of any length up to 4 080 bytes are verified with a fixed number of 16-byte SIMD
-chunk compares behind a single page-safety guard — no loop over characters, no branch on
-the length. 40 fully-qualified Java class names (24–54 bytes): **2.8 ns** per lookup,
-where the previous scalar byte loop took 23 ns.
+chunk compares — no loop over characters, no branch on the length; 17–32-byte keys are
+compared fully branch-free (shift-realigned loads, safe for any input address). 40
+fully-qualified Java class names (24–54 bytes): **2.05 ns** per lookup, where the
+previous scalar byte loop took 23 ns. Short keys (≤ 7 bytes) in sets of 8+ keys also
+route to the wide container automatically — the S&P 100 drops from 1.77 to 1.32 ns.
 
 
 ## Building
