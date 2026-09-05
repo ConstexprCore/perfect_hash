@@ -178,9 +178,7 @@ void run_keyset(const std::string& name, const Wide& wide, const FrozenT* frozen
 
   auto hits = benchx::build_input(hits_pool, num_strings, 42);
   auto misses = benchx::build_input(miss_pool, num_strings, 42);
-  std::vector<std::string_view> mixed_pool(hits_pool);
-  mixed_pool.insert(mixed_pool.end(), miss_pool.begin(), miss_pool.end());
-  auto mixed = benchx::build_input(mixed_pool, num_strings, 42);
+  auto mixed = benchx::build_mixed_input(hits_pool, miss_pool, num_strings, 42);
 
   auto run = [&](const char* wl, std::vector<std::string_view>& input) {
     std::string L = std::string(wl) + " ";

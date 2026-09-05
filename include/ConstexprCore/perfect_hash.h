@@ -239,10 +239,10 @@ struct perfect_hash_set {
         }
         num_positions_ = static_cast<std::uint8_t>(data.num_positions);
         hash_seed_ = data.seed;
-        // Copy positions. For H&D mode (num_positions == 0xFF), only copy
-        // the 2 positions used by the bucket hash, not all 255.
-        std::size_t pos_count = data.num_positions < detail::MAX_POSITIONS
-            ? data.num_positions : detail::MAX_POSITIONS;
+        // H&D stores only its key-hash variant; whole-key hashing needs no
+        // positions. The gperf mode uses the selected position count.
+        std::size_t pos_count = data.num_positions == HD_MODE ? 1
+            : data.num_positions == FULLHASH_MODE ? 0 : data.num_positions;
         for (std::size_t i = 0; i < pos_count; ++i)
             positions_[i] = (data.positions[i] == detail::LAST_CHAR)
                 ? POS_LAST_CHAR
@@ -359,6 +359,9 @@ struct perfect_hash_set {
     // 3. Byte-by-byte loop: for MaxKeyLen > 8 or consteval context.
     [[nodiscard]] constexpr constexprcore_really_inline bool compare_key_(
         const char* p, std::size_t len, std::size_t slot) const noexcept {
+        // No byte needs comparing for an empty key; data() may be null.
+        // Callers check the stored length separately.
+        if (len == 0) return true;
         if consteval {
             // consteval: byte-by-byte (no intrinsics)
             const char* a = slot_key_data_[slot].data();
@@ -533,10 +536,10 @@ struct perfect_hash_set {
                     return s % TableSize;
             }
             {
-            // H&D mode: bucket hash + key hash. positions_[2] selects the key hash variant.
+            // H&D mode: bucket hash + key hash. positions_[0] selects the key hash variant.
             // The 2-byte variant saves ~10 insn by skipping 2 safe_char rounds.
             std::size_t bucket = detail::hd_bucket_hash(key);
-            std::size_t kh = (positions_[2] == detail::HD_HASH_2BYTE_FLAG)
+            std::size_t kh = (positions_[0] == detail::HD_HASH_2BYTE_FLAG)
                 ? detail::hd_key_hash_2(key)
                 : detail::hd_key_hash_4(key);
             std::size_t h = asso_values_[0][bucket] + kh;
@@ -571,8 +574,10 @@ struct perfect_hash_set {
         // positions beyond the shortest keys (e.g. Counters: position 8 vs
         // 6-8-byte keys -> 0.31+ misses/lookup on the branchy form).
         if constexpr (N >= 64 || MaxKeyLen > 16) {
-            const char* kp = key.data();
             const std::size_t klen = key.size();
+            // An empty view may have a null data pointer. The masked load
+            // still reads byte zero, so give it valid storage in that case.
+            const char* kp = klen != 0 ? key.data() : "";
             for (std::uint8_t i = 0; i < num_positions_; ++i) {
                 std::uint8_t pos = positions_[i];
                 std::size_t idx = (pos == POS_LAST_CHAR)
@@ -758,15 +763,16 @@ inline constexpr std::array<ValueT, sizeof...(KVs)> kv_values_v{static_cast<Valu
 //   MaxKeyLen 2..7, N >= 8  -> wide    (one 64-bit lane holds key+length, so
 //                              the compare IS the hash input: S&P 100
 //                              1.77 -> 1.32 ns, C++ keywords 1.42 -> 1.32)
-//   tiny N (< 8)            -> classic (fully-predicted branchy hash + a
+//   tiny N (< 8), len < 255 -> classic (fully-predicted branchy hash + a
 //                              one-cache-line table still win: URL protocols
 //                              1.27 classic vs 1.33 wide at N = 6)
-//   MaxKeyLen >= 8          -> classic (two-lane extraction + two multiplies
+//   MaxKeyLen 8..254        -> classic (two-lane extraction + two multiplies
 //                              lose to 1-2 chosen positions + one vector
 //                              compare: HTTP headers 1.33 classic vs 1.75 wide)
 //   N > 255                 -> wide    (byte-indexed design ends at 255)
+//   MaxKeyLen >= 255         -> wide    (classic reserves byte length 255)
 constexpr bool prefer_wide_container(std::size_t n, std::size_t max_len) noexcept {
-    return n > 255 || (n >= 8 && max_len >= 2 && max_len <= 7);
+    return n > 255 || max_len >= 255 || (n >= 8 && max_len >= 2 && max_len <= 7);
 }
 
 template <fixed_string... Keys>
@@ -778,15 +784,6 @@ consteval auto make_perfect_set() {
         return make_wide_perfect_set<detail::keys_of_v<Keys...>>();
     } else {
     constexpr std::array<std::string_view, N> keys{Keys.view()...};
-
-    // Validate no duplicates
-    for (std::size_t i = 0; i < N; ++i) {
-        for (std::size_t j = i + 1; j < N; ++j) {
-            if (keys[i] == keys[j]) {
-                throw "Duplicate key in make_perfect_set";
-            }
-        }
-    }
 
     // Compute PHF once (determines table size + all data)
     constexpr auto data = detail::compute_phf<N>(keys);
@@ -837,15 +834,6 @@ consteval auto make_perfect_map() {
         return make_wide_perfect_map<detail::kv_keys_v<KVs...>, detail::kv_values_v<ValueT, KVs...>>();
     } else {
     constexpr std::array<std::string_view, N> keys{KVs::key...};
-
-    // Validate no duplicates
-    for (std::size_t i = 0; i < N; ++i) {
-        for (std::size_t j = i + 1; j < N; ++j) {
-            if (keys[i] == keys[j]) {
-                throw "Duplicate key in make_perfect_map";
-            }
-        }
-    }
 
     constexpr std::array<ValueT, N> values{static_cast<ValueT>(KVs::value)...};
 

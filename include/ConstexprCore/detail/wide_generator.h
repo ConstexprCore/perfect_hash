@@ -85,13 +85,20 @@ constexpr std::uint64_t wide_mult(std::uint64_t seed, std::size_t lane) noexcept
 // The hash. Strong=false: one multiply per lane, xor-combined — the lowest
 // latency form; its bucket/base bits are the top bits of a multiplicative
 // hash, which is good enough for real key sets because the generator
-// VERIFIES the result and re-seeds on dead pairs. Strong=true adds a final
-// avalanche for key sets where the fast form keeps producing dead pairs.
+// VERIFIES the result and re-seeds on dead pairs. Strong=true avalanches
+// between lanes as well as after the last lane. Mixing only the final XOR
+// cannot separate high-bit changes that cancel across two lane products.
 template <std::size_t L, bool Strong>
 constexpr std::uint64_t wide_hash(const std::array<std::uint64_t, L>& lanes,
                                   const std::array<std::uint64_t, L>& muls) noexcept {
     std::uint64_t h = lanes[0] * muls[0];
-    for (std::size_t i = 1; i < L; ++i) h ^= lanes[i] * muls[i];
+    for (std::size_t i = 1; i < L; ++i) {
+        if constexpr (Strong) {
+            h ^= h >> 29;
+            h *= 0xBF58476D1CE4E5B9ULL;
+        }
+        h ^= lanes[i] * muls[i];
+    }
     if constexpr (Strong) {
         h ^= h >> 29;
         h *= 0xBF58476D1CE4E5B9ULL;
@@ -157,8 +164,10 @@ consteval bool wide_try_place(
     std::array<std::uint32_t, N> base{};
     for (std::size_t i = 0; i < N; ++i) {
         const std::uint64_t h = wide_hash<L, Strong>(lanes[i], muls);
-        bucket[i] = static_cast<std::uint32_t>(b_bits == 0 ? 0 : (h >> (64 - b_bits)));
-        base[i]   = static_cast<std::uint32_t>((h >> (64 - b_bits - m_bits)) & (M - 1));
+        if constexpr (b_bits != 0)
+            bucket[i] = static_cast<std::uint32_t>(h >> (64 - b_bits));
+        if constexpr (m_bits != 0)
+            base[i] = static_cast<std::uint32_t>((h >> (64 - b_bits - m_bits)) & (M - 1));
     }
 
     // Counting sort keys by bucket → contiguous key ranges per bucket.

@@ -57,8 +57,8 @@ def main() -> int:
         ("detail/lsx_compare.h", Path(args.lsx_compare), True),
         ("detail/simd16.h", Path(args.simd16), True),
         ("detail/wide_generator.h", Path(args.wide_generator), True),
-        ("perfect_hash.h", Path(args.perfect_hash), True),
         ("wide_perfect_hash.h", Path(args.wide_perfect_hash), True),
+        ("perfect_hash.h", Path(args.perfect_hash), True),
     ]
 
     parts = [

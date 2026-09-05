@@ -32,6 +32,7 @@
 #include "phf.hh"
 #include "hashes.hh"
 #include "pthash_wrapper.h"
+#include "bench_input.h"
 
 // ============================================================================
 // Filter support: --filter hits,make_perfect_map,protocol
@@ -141,16 +142,7 @@ void pretty_print(const std::string &name, size_t num_values,
   std::print("\n");
 }
 
-// Build a shuffled input vector from a pool of candidate strings.
-std::vector<std::string_view> build_input(
-    const std::vector<std::string_view> &pool, size_t count, uint64_t seed) {
-  std::mt19937_64 gen(seed);
-  std::vector<std::string_view> result;
-  result.reserve(count);
-  for (size_t i = 0; i < count; i++)
-    result.push_back(pool[gen() % pool.size()]);
-  return result;
-}
+using benchx::build_input;
 
 // Generic benchmark: runs PHF, naive, and unordered_map on a given input vector.
 template <typename PHFMap, typename NaiveFn, typename FrozenMap, typename KronuzPHF, typename GperfFn>
@@ -352,11 +344,7 @@ void run_keyset(const std::string &name,
   auto hits   = build_input(hit_keys, num_strings, 42);
   auto misses = build_input(miss_keys, num_strings, 42);
 
-  // Mixed: 50/50 interleaved
-  std::vector<std::string_view> mixed_pool;
-  mixed_pool.insert(mixed_pool.end(), hit_keys.begin(), hit_keys.end());
-  mixed_pool.insert(mixed_pool.end(), miss_keys.begin(), miss_keys.end());
-  auto mixed = build_input(mixed_pool, num_strings, 42);
+  auto mixed = benchx::build_mixed_input(hit_keys, miss_keys, num_strings, 42);
 
   if (filter.run_workload("hits")) {
     std::println("  --- all hits ---");

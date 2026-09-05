@@ -14,6 +14,7 @@
 // neon_compare.h / sse2_compare.h / lsx_compare.h.
 // ============================================================================
 
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -117,11 +118,16 @@ constexprcore_really_inline chunk16 load_chunk16(const char* p, std::size_t len)
 inline constexpr bool MASK_ROW_INDEX_STYLE = false;
 #define CONSTEXPRCORE_HAS_BYTE_SHUFFLE 0
 constexprcore_really_inline chunk16 load_chunk16_row(const char* p, const std::uint8_t* row) noexcept {
-    return { _mm_and_si128(_mm_loadu_si128(reinterpret_cast<const __m128i*>(p)),
+    return { _mm_and_si128(sse2_load_mapped_16(p),
                            _mm_loadu_si128(reinterpret_cast<const __m128i*>(row))) };
 }
 constexprcore_really_inline chunk16 load_raw16(const char* p) noexcept {
-    return { _mm_loadu_si128(reinterpret_cast<const __m128i*>(p)) };
+    return { sse2_load_mapped_16(p) };
+}
+constexprcore_really_inline const char* sse2_mapped_offset(const char* p, std::size_t off) noexcept {
+    // A page-guarded window may extend past the C++ input object. Form its
+    // machine address without out-of-bounds C++ pointer arithmetic.
+    return reinterpret_cast<const char*>(reinterpret_cast<std::uintptr_t>(p) + off);
 }
 constexprcore_really_inline eqmask16 eq_or(eqmask16 a, eqmask16 b) noexcept { return _mm_or_si128(a, b); }
 constexprcore_really_inline eqmask16 eq_force(bool f) noexcept { return _mm_set1_epi8(static_cast<char>(-static_cast<int>(f))); }
@@ -181,6 +187,7 @@ constexprcore_really_inline std::uint64_t scalar_safe_byte(const char* p, std::s
     return static_cast<std::uint64_t>(static_cast<unsigned char>(p[si])) & (std::uint64_t{0} - has);
 }
 constexprcore_really_inline chunk16 load_chunk16(const char* p, std::size_t len) noexcept {
+    if (len == 0) return {0, 0};
     std::uint64_t lo = 0, hi = 0;
     for (std::size_t i = 0; i < 8; ++i) lo |= scalar_safe_byte(p, len, i) << (8 * i);
     for (std::size_t i = 0; i < 8; ++i) hi |= scalar_safe_byte(p, len, 8 + i) << (8 * i);
@@ -189,6 +196,12 @@ constexprcore_really_inline chunk16 load_chunk16(const char* p, std::size_t len)
 constexprcore_really_inline std::uint64_t lane0(chunk16 c) noexcept { return c.lo; }
 constexprcore_really_inline std::uint64_t lane1(chunk16 c) noexcept { return c.hi; }
 constexprcore_really_inline eqmask16 eq_chunk(chunk16 c, const char* stored) noexcept {
+    if constexpr (std::endian::native != std::endian::little) {
+        // The input lanes have a fixed little-endian representation.
+        // Assemble the stored lanes the same way on other byte orders.
+        const auto expected = load_chunk16(stored, 16);
+        return { (c.lo ^ expected.lo) | (c.hi ^ expected.hi) };
+    }
     std::uint64_t a, b;
     std::memcpy(&a, stored, 8);
     std::memcpy(&b, stored + 8, 8);
@@ -203,7 +216,7 @@ constexprcore_really_inline chunk16 load_chunk16_unguarded(const char* p, std::s
 #if CONSTEXPRCORE_HAS_NEON
     return { vqtbl1q_u8(vld1q_u8(reinterpret_cast<const uint8_t*>(p)), vld1q_u8(chunk_mask_row(len))) };
 #elif CONSTEXPRCORE_HAS_SSE2
-    return { _mm_and_si128(_mm_loadu_si128(reinterpret_cast<const __m128i*>(p)),
+    return { _mm_and_si128(sse2_load_mapped_16(p),
                            _mm_loadu_si128(reinterpret_cast<const __m128i*>(and_masks[len]))) };
 #elif CONSTEXPRCORE_HAS_LSX
     return { __lsx_vand_v(__lsx_vld(p, 0), __lsx_vld(and_masks[len], 0)) };
@@ -253,8 +266,13 @@ constexprcore_really_inline bool compare_chunks_direct(const char* p, std::size_
     const auto& SM = sliding_masks_v<MaxKeyLen>;
     eqmask16 m = eq_chunk(load_chunk16_row(p, SM.rows[len + 16 * (C - 1)]), stored);
     [&]<std::size_t... I>(std::index_sequence<I...>) {
+#if CONSTEXPRCORE_HAS_SSE2
+        ((m = eq_and(m, eq_chunk(load_chunk16_row(sse2_mapped_offset(p, 16 * (I + 1)), SM.rows[len + 16 * (C - 2 - I)]),
+                                 stored + 16 * (I + 1)))), ...);
+#else
         ((m = eq_and(m, eq_chunk(load_chunk16_row(p + 16 * (I + 1), SM.rows[len + 16 * (C - 2 - I)]),
                                  stored + 16 * (I + 1)))), ...);
+#endif
     }(std::make_index_sequence<C - 1>{});
     return all_equal(m);
 }
@@ -263,8 +281,11 @@ template <std::size_t MaxKeyLen>
 constexprcore_really_inline bool compare_chunks_direct(const char* p, std::size_t len, const char* stored) noexcept {
     constexpr std::size_t C = (MaxKeyLen + 15) / 16;
     eqmask16 m = eq_chunk(load_chunk16_unguarded(p, chunk_len(len, 0)), stored);
+    // Empty chunks keep the original pointer instead of forming an
+    // out-of-bounds pointer, even though their byte loads are skipped.
     [&]<std::size_t... I>(std::index_sequence<I...>) {
-        ((m = eq_and(m, eq_chunk(load_chunk16_unguarded(p + 16 * (I + 1), chunk_len(len, 16 * (I + 1))),
+        ((m = eq_and(m, eq_chunk(load_chunk16_unguarded(p + (len > 16 * (I + 1) ? 16 * (I + 1) : 0),
+                                                     chunk_len(len, 16 * (I + 1))),
                                  stored + 16 * (I + 1)))), ...);
     }(std::make_index_sequence<C - 1>{});
     return all_equal(m);
@@ -315,18 +336,27 @@ CONSTEXPRCORE_NO_SANITIZE_ADDRESS constexprcore_really_inline bool compare_2chun
 template <std::size_t MaxKeyLen>
 CONSTEXPRCORE_NO_SANITIZE_ADDRESS constexprcore_really_inline bool compare_chunks(const char* p, std::size_t len, const char* stored) noexcept {
     constexpr std::size_t C = (MaxKeyLen + 15) / 16;
+    constexpr std::size_t SPAN = 16 * C;
     static_assert(C >= 1);
+    static_assert(SPAN <= 4096, "MaxKeyLen too large for a single-page guard");
+    // Keep known short objects inside their bounds before forming any
+    // per-chunk pointers. The fallback also lets literal probes fold to
+    // constants instead of exposing an out-of-bounds vector load.
+#if defined(__GNUC__) || defined(__clang__)
+    const bool full_object = __builtin_object_size(p, 0) >= SPAN;
+#else
+    const bool full_object = true;
+#endif
 #if CONSTEXPRCORE_HAS_BYTE_SHUFFLE && !defined(CONSTEXPRCORE_NO_BRANCHFREE_2CHUNKS)
     // Two-chunk keys (17..32 B) go through the fully branch-free compare: no
     // page guard to mispredict when input keys happen to sit near page ends
     // (measured: a literal pool straddling a page cost 0.75 bm and 3.7x wall
     // time on the guarded form; this form is +5 instructions, always 0 bm).
-    if constexpr (C == 2) return compare_2chunks_branchfree<MaxKeyLen>(p, len, stored);
+    if constexpr (C == 2)
+        if (full_object) return compare_2chunks_branchfree<MaxKeyLen>(p, len, stored);
 #endif
-    constexpr std::size_t SPAN = 16 * C;
-    static_assert(SPAN <= 4096, "MaxKeyLen too large for a single-page guard");
     const std::uintptr_t addr = reinterpret_cast<std::uintptr_t>(p);
-    if ((addr & 4095) <= 4096 - SPAN) [[likely]] {
+    if (full_object && (addr & 4095) <= 4096 - SPAN) [[likely]] {
         return compare_chunks_direct<MaxKeyLen>(p, len, stored);
     }
     alignas(16) char buf[SPAN] = {};

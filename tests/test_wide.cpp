@@ -4,8 +4,13 @@
 #include <ConstexprCore/wide_perfect_hash.h>
 
 #include <array>
+#include <limits>
 #include <string>
 #include <string_view>
+#if defined(__unix__) || defined(__APPLE__)
+#include <sys/mman.h>
+#include <unistd.h>
+#endif
 
 using namespace ConstexprCore;
 
@@ -68,6 +73,80 @@ inline constexpr std::array<std::string_view, 12> long_keys = {
 };
 
 } // namespace
+
+inline constexpr std::array<std::string_view, 1> singleton_keys{"singleton"};
+inline constexpr std::array<std::string_view, 1> empty_keys{std::string_view{}};
+inline constexpr std::array<std::string_view, 3> mixed_empty_keys{
+    std::string_view{}, "short", "a key spanning more than two sixteen-byte chunks"};
+inline constexpr auto wide_singleton = make_wide_perfect_set<singleton_keys>();
+inline constexpr auto wide_empty = make_wide_perfect_set<empty_keys>();
+inline constexpr auto wide_mixed_empty = make_wide_perfect_index_map<mixed_empty_keys>();
+
+TEST_CASE("wide: singleton tables and null empty views") {
+    static_assert(wide_singleton.table_size() == 1);
+    static_assert(wide_singleton.contains("singleton"));
+    static_assert(!wide_singleton.contains(std::string_view{}));
+    static_assert(wide_empty.table_size() == 1);
+    static_assert(wide_empty.contains(std::string_view{}));
+    static_assert(!wide_empty.contains("x"));
+    static_assert(wide_mixed_empty.lookup_or(std::string_view{}, 99) == 0);
+    CHECK(wide_singleton.contains(std::string(singleton_keys[0])));
+    CHECK_FALSE(wide_singleton.contains(std::string_view{}));
+    CHECK(wide_empty.contains(std::string_view{}));
+    CHECK_FALSE(wide_empty.contains("x"));
+    CHECK(wide_empty.index_of(std::string_view{}) == 0);
+    CHECK(wide_mixed_empty.lookup_or(std::string_view{}, 99) == 0);
+    CHECK(wide_mixed_empty.contains("short"));
+    CHECK_FALSE(wide_mixed_empty.contains("s"));
+}
+
+TEST_CASE("wide: slot index storage covers doubled tables") {
+    using small = wide_perfect_hash_set<32768, 65536, 1>;
+    using doubled = wide_perfect_hash_set<32769, 131072, 1>;
+    static_assert(std::numeric_limits<small::slot_index_t>::max() >= 65535);
+    static_assert(std::numeric_limits<doubled::slot_index_t>::max() >= 131071);
+    static_assert(sizeof(small::slot_index_t) == sizeof(std::uint16_t));
+    static_assert(sizeof(doubled::index_t) == sizeof(std::uint16_t));
+    CHECK(std::numeric_limits<decltype(doubled::key_to_slot_)::value_type>::max() >= 131071);
+}
+
+#if defined(__unix__) || defined(__APPLE__)
+inline constexpr std::array<std::string_view, 3> wide_guard_keys{
+    "a", "0123456789abcdefX", "0123456789abcdef0123456789abcdef"};
+inline constexpr auto wide_guard = make_wide_perfect_set<wide_guard_keys>();
+
+TEST_CASE("wide: short probes in long-key tables end at a protected page") {
+    const long page_size = sysconf(_SC_PAGESIZE);
+    REQUIRE(page_size > 0);
+    const std::size_t bytes = static_cast<std::size_t>(page_size) * 2;
+    void* mapping = mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    REQUIRE(mapping != MAP_FAILED);
+    struct unmap_on_exit {
+        void* mapping;
+        std::size_t bytes;
+        ~unmap_on_exit() { munmap(mapping, bytes); }
+    } cleanup{mapping, bytes};
+    char* end = static_cast<char*>(mapping) + page_size;
+    REQUIRE(mprotect(end, static_cast<std::size_t>(page_size), PROT_NONE) == 0);
+    auto check_probes = [&](const auto& table, const auto& declared_keys) {
+        for (auto key : declared_keys) {
+            for (std::size_t len = 1; len <= key.size(); ++len) {
+                char* p = end - len;
+                for (std::size_t i = 0; i < len; ++i) p[i] = key[i];
+                const std::string_view probe(p, len);
+                bool expected = false;
+                for (auto declared : declared_keys) expected |= (declared == probe);
+                CAPTURE(len);
+                CHECK(table.contains(probe) == expected);
+            }
+        }
+    };
+    check_probes(wide_guard, wide_guard_keys);
+    check_probes(wide_mixed_empty, mixed_empty_keys);
+    CHECK_FALSE(wide_guard.contains(std::string_view(end, 0)));
+    CHECK(wide_mixed_empty.contains(std::string_view(end, 0)));
+}
+#endif
 
 // ---------------------------------------------------------------------------
 // wide set: 300 short keys
@@ -222,6 +301,69 @@ TEST_CASE("wide map: values fused into the key lane round-trip exactly, incl. ex
     CHECK_FALSE(fused_u16.contains(std::string_view("k12\0\0\x12\x34", 7)));
     CHECK_FALSE(fused_u16.contains(std::string_view("k12\0\0\xff\xff", 7)));
     CHECK_FALSE(fused_u16.contains("k1234567"));
+}
+
+inline constexpr std::array<std::string_view, 2> fused_medium_keys{"abcdefghi", "ABCDEFGHI"};
+inline constexpr std::array<std::uint8_t, 2> fused_medium_values{0, 255};
+inline constexpr std::array<bool, 2> wide_bool_values{false, true};
+inline constexpr auto fused_medium = make_wide_perfect_map<fused_medium_keys, fused_medium_values>();
+inline constexpr auto wide_bool = make_wide_perfect_map<fused_medium_keys, wide_bool_values>();
+inline constexpr auto automatic_wide_bool = make_perfect_map<
+    kv<"aa", false>, kv<"ab", true>, kv<"ac", false>, kv<"ad", true>,
+    kv<"ae", false>, kv<"af", true>, kv<"ag", false>, kv<"ah", true>>();
+
+TEST_CASE("wide map: two-lane fusion preserves every byte of the first lane") {
+    static_assert(decltype(fused_medium)::FUSED);
+    static_assert(!decltype(wide_bool)::FUSED);
+    static_assert(!decltype(automatic_wide_bool)::FUSED);
+    static_assert(*automatic_wide_bool.lookup("ab"));
+    static_assert(!*automatic_wide_bool.lookup("aa"));
+    static_assert(!fused_medium.contains("aXcdefghi"));
+    static_assert(*wide_bool.lookup("ABCDEFGHI"));
+    CHECK(automatic_wide_bool.lookup_or("ab", false));
+    CHECK_FALSE(automatic_wide_bool.lookup_or("aa", true));
+    CHECK_FALSE(automatic_wide_bool.lookup("missing").has_value());
+    for (std::size_t i = 0; i < fused_medium_keys.size(); ++i) {
+        std::string key(fused_medium_keys[i]);
+        CHECK(fused_medium.lookup_or(key, 42) == fused_medium_values[i]);
+        CHECK(fused_medium.key_at(i) == key);
+        CHECK(*wide_bool.lookup(key) == wide_bool_values[i]);
+        for (std::size_t pos = 0; pos < key.size(); ++pos) {
+            for (unsigned byte = 0; byte < 256; ++byte) {
+                std::string probe = key;
+                probe[pos] = static_cast<char>(byte);
+                if (probe == key) continue;
+                CAPTURE(i);
+                CAPTURE(pos);
+                CAPTURE(byte);
+                CHECK_FALSE(fused_medium.contains(probe));
+                CHECK_FALSE(fused_medium.lookup(probe).has_value());
+                CHECK(fused_medium.lookup_or(probe, 42) == 42);
+            }
+        }
+    }
+}
+
+inline constexpr std::array<std::string_view, 2> wide_binary_keys{
+    std::string_view("aaaaaaa\0bbbbbbb\0", 16),
+    std::string_view("aaaaaaa\x80" "bbbbbbb\x80", 16)};
+inline constexpr auto wide_binary = make_wide_perfect_index_map<wide_binary_keys>();
+
+TEST_CASE("wide: strong fallback separates high-bit changes across lanes") {
+    static_assert(wide_binary.set_.algorithm_name() == "wide-pilot/strong");
+    static_assert(*wide_binary.lookup(wide_binary_keys[0]) == 0);
+    static_assert(*wide_binary.lookup(wide_binary_keys[1]) == 1);
+    for (std::size_t i = 0; i < wide_binary_keys.size(); ++i) {
+        std::string key(wide_binary_keys[i]);
+        REQUIRE(wide_binary.lookup(key).has_value());
+        CHECK(*wide_binary.lookup(key) == i);
+        CHECK(wide_binary.key_at(i) == key);
+        for (std::size_t pos = 0; pos < key.size(); ++pos) {
+            std::string probe = key;
+            probe[pos] ^= 0x40;
+            CHECK_FALSE(wide_binary.contains(probe));
+        }
+    }
 }
 
 TEST_CASE("wide: algorithm description mentions the pilot scheme") {

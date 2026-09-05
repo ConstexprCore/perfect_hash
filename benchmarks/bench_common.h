@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "counters/bench.h"
+#include "bench_input.h"
 
 namespace benchx {
 
@@ -46,15 +47,6 @@ inline void pretty_print(const std::string &name, size_t num_values, counters::e
                agg.fastest_branch_misses() / double(num_values));
   }
   std::print("\n");
-}
-
-inline std::vector<std::string_view> build_input(const std::vector<std::string_view> &pool,
-                                                 size_t count, uint64_t seed) {
-  std::mt19937_64 gen(seed);
-  std::vector<std::string_view> result;
-  result.reserve(count);
-  for (size_t i = 0; i < count; i++) result.push_back(pool[gen() % pool.size()]);
-  return result;
 }
 
 // Generic filter: any token not in a category means "run all" for it.

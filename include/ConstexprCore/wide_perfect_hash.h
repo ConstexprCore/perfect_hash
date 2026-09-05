@@ -21,6 +21,7 @@
 #include <ConstexprCore/detail/wide_generator.h>
 #include <ConstexprCore/detail/simd16.h>
 #include <array>
+#include <bit>
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -57,6 +58,7 @@ struct wide_perfect_hash_set {
     static_assert(FusedBits <= SPARE_BITS, "FusedBits does not fit in the spare bytes of the length lane");
     static constexpr std::uint64_t FUSED_MASK = FusedBits == 0 ? 0 : (((std::uint64_t{1} << FusedBits) - 1) << SPARE_SHIFT);
     using index_t = std::conditional_t<(N < 65535), std::uint16_t, std::uint32_t>;
+    using slot_index_t = std::conditional_t<(TableSize <= 65536), std::uint16_t, std::uint32_t>;
     using pilot_t = std::conditional_t<(TableSize <= 65536), std::uint16_t, std::uint32_t>;
 
     // --- hot data, most latency-critical array first (offset 0 → no add
@@ -79,7 +81,7 @@ struct wide_perfect_hash_set {
     std::uint8_t min_key_len_{};
     // --- cold data ---
     std::array<index_t, TableSize> slot_to_key_{};   // N == empty
-    std::array<index_t, N> key_to_slot_{};
+    std::array<slot_index_t, N> key_to_slot_{};
 
     consteval wide_perfect_hash_set(const std::array<std::string_view, N>& keys,
                                     const detail::wide_result<N>& plan) {
@@ -99,7 +101,7 @@ struct wide_perfect_hash_set {
             const std::size_t ki = slot_to_key_[s];
             if (ki >= N) continue;
             const std::string_view k = keys[ki];
-            key_to_slot_[ki] = static_cast<index_t>(s);
+            key_to_slot_[ki] = static_cast<slot_index_t>(s);
             if constexpr (LANE_COMPARE) {
                 const auto lanes = detail::wide_key_lanes<MaxKeyLen>(k);
                 for (std::size_t j = 0; j < L; ++j)
@@ -124,7 +126,7 @@ struct wide_perfect_hash_set {
         return Strong ? std::string_view("wide-pilot/strong") : std::string_view("wide-pilot");
     }
     [[nodiscard]] constexpr std::string algorithm_description() const {
-        return "wide-pilot: h = " + std::string(Strong ? "avalanche(" : "(") + "xor of " + std::to_string(L) +
+        return "wide-pilot: h = " + std::string(Strong ? "iterated avalanche(" : "(") + "xor of " + std::to_string(L) +
                " lane(s) x K_i, seed " + std::to_string(seed_) + "); bucket = h >> " + std::to_string(64 - B_BITS) +
                " [" + std::to_string(B) + " buckets]; slot = ((h >> " + std::to_string(64 - B_BITS - M_BITS) +
                ") + pilot[bucket]) & " + std::to_string(TableSize - 1) +
@@ -133,7 +135,7 @@ struct wide_perfect_hash_set {
     // Stored lane j of a slot, assembled at consteval / loaded at runtime.
     [[nodiscard]] constexpr constexprcore_really_inline std::uint64_t stored_lane_(std::size_t slot, std::size_t j) const noexcept
         requires LANE_COMPARE {
-        if (std::is_constant_evaluated()) {
+        if (std::is_constant_evaluated() || std::endian::native != std::endian::little) {
             std::uint64_t v = 0;
             for (std::size_t b = 0; b < 8; ++b)
                 v |= static_cast<std::uint64_t>(static_cast<unsigned char>(packed_bytes_[slot][8 * j + b])) << (8 * b);
@@ -168,15 +170,22 @@ struct wide_perfect_hash_set {
     }
 
     [[nodiscard]] constexpr constexprcore_really_inline std::size_t slot_of_(std::uint64_t h) const noexcept {
-        const std::size_t bucket = B_BITS == 0 ? 0 : static_cast<std::size_t>(h >> (64 - B_BITS));
-        const std::size_t base = static_cast<std::size_t>(h >> (64 - B_BITS - M_BITS)) & (TableSize - 1);
+        std::size_t bucket = 0, base = 0;
+        if constexpr (B_BITS != 0) bucket = static_cast<std::size_t>(h >> (64 - B_BITS));
+        if constexpr (M_BITS != 0)
+            base = static_cast<std::size_t>(h >> (64 - B_BITS - M_BITS)) & (TableSize - 1);
         return (base + pilots_[bucket]) & (TableSize - 1);
     }
 
     // Core: returns the slot if the key is present. No data-dependent branch
     // on a hit stream except the page-safety guard inside the chunk load.
     [[nodiscard]] constexpr constexprcore_really_inline std::optional<std::size_t> slot_match(std::string_view key) const noexcept {
-        if (min_key_len_ > 0 && key.empty()) return std::nullopt;
+        // Empty views may have a null data pointer. Their lanes (and hash)
+        // are zero, so answer directly without entering the SIMD loader.
+        if (key.empty()) {
+            if (min_key_len_ == 0) return slot_of_(0);
+            return std::nullopt;
+        }
         const std::size_t len = key.size();
         const char* p = key.data();
         // One clamp serves both the load and the folded length byte. With a
@@ -215,7 +224,11 @@ struct wide_perfect_hash_set {
                 lanes[1] = detail::lane1(c);
             } else {
                 for (std::size_t j = 0; j < CHUNKS; ++j) {
-                    const auto c = detail::load_chunk16(p + 16 * j, detail::chunk_len(clamped, 16 * j));
+                    // A masked-out chunk still performs a vector load. Keep
+                    // its pointer inside the key even when the key is short.
+                    const std::size_t off = 16 * j;
+                    const char* chunk_p = off < clamped ? p + off : p;
+                    const auto c = detail::load_chunk16(chunk_p, detail::chunk_len(clamped, off));
                     lanes[2 * j] = detail::lane0(c);
                     lanes[2 * j + 1] = detail::lane1(c);
                 }
@@ -225,8 +238,13 @@ struct wide_perfect_hash_set {
             bool ok;
             if constexpr (LANE_COMPARE) {
                 std::uint64_t diff = stored_lane_(slot, 0) ^ lanes[0];
-                if constexpr (L == 2) diff |= stored_lane_(slot, 1) ^ lanes[1];
-                if constexpr (FusedBits > 0) diff &= ~FUSED_MASK;   // one logical-immediate AND
+                if constexpr (L == 2) {
+                    std::uint64_t upper_diff = stored_lane_(slot, 1) ^ lanes[1];
+                    if constexpr (FusedBits > 0) upper_diff &= ~FUSED_MASK;
+                    diff |= upper_diff;
+                } else if constexpr (FusedBits > 0) {
+                    diff &= ~FUSED_MASK;
+                }
                 ok = (diff == 0);
             } else {
                 // stored lengths are <= MaxKeyLen, so a too-long key fails here
@@ -259,7 +277,8 @@ namespace detail {
 template <typename ValueT, std::size_t MaxKeyLen>
 constexpr std::size_t wide_fused_bits() {
     constexpr std::size_t LEN_LANE = wide_len_lane_for(MaxKeyLen);
-    if constexpr (LEN_LANE == std::size_t(-1) || !std::is_integral_v<ValueT> || std::is_same_v<ValueT, bool>) return 0;
+    if constexpr (LEN_LANE == std::size_t(-1) || !std::is_integral_v<ValueT> ||
+                  std::is_same_v<std::remove_cv_t<ValueT>, bool>) return 0;
     else {
         constexpr std::size_t spare = 8 * (7 - (MaxKeyLen - 8 * LEN_LANE));
         return (sizeof(ValueT) * 8 <= spare) ? sizeof(ValueT) * 8 : 0;

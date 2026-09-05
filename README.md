@@ -81,10 +81,10 @@ std::optional<Method> parse_method(std::string_view s) {
 The same two factories keep working past 255 entries: they switch to the *wide* container
 (`wide_perfect_hash_set` / `wide_perfect_hash_map`, header `wide_perfect_hash.h`), which
 replaces gperf's chosen byte positions with a whole-key multiplicative hash plus a small
-per-bucket pilot table — a compile-time PTHash. Every lookup is one multiply, one 16-bit
-pilot load and one key load; values that fit in the spare bytes of a short key are stored
-inside the key word itself. For generated key lists, pass a static-storage array by
-reference:
+per-bucket pilot table. The fast hash uses one multiply per 64-bit key lane. Keys up to
+7 bytes need just one lane; values that fit in its spare bytes are stored inside the
+key word itself. Larger keys need more lanes, and difficult sets can select a stronger
+hash at compile time. For generated key lists, pass a static-storage array by reference:
 
 ```cpp
 #include <ConstexprCore/wide_perfect_hash.h>
@@ -110,12 +110,23 @@ benchmarks' `CMakeLists.txt` does.
 
 ### Long keys (more than 32 bytes)
 
-Keys of any length up to 4 080 bytes are verified with a fixed number of 16-byte SIMD
-chunk compares — no loop over characters, no branch on the length; 17–32-byte keys are
-compared fully branch-free (shift-realigned loads, safe for any input address). 40
+Keys up to 4 080 bytes are supported by the wide container; the factories also select
+it when keys exceed the classic container's 254-byte limit. On SIMD targets, longer
+keys use a fixed number of 16-byte chunk compares. The NEON 17–32-byte comparison
+uses branch-free, shift-realigned loads; SSE2 and LSX use a page guard. Scalar targets
+use byte loads. 40
 fully-qualified Java class names (24–54 bytes): **2.05 ns** per lookup, where the
-previous scalar byte loop took 23 ns. Short keys (≤ 7 bytes) in sets of 8+ keys also
-route to the wide container automatically — the S&P 100 drops from 1.77 to 1.32 ns.
+previous scalar byte loop took 23 ns. Sets of 8+ keys with a maximum length of 2–7 bytes
+also route to the wide container automatically — the S&P 100 drops from 1.77 to 1.32 ns.
+Single-byte sets with at most 255 keys use a direct table.
+
+Generation verifies every stored key at compile time and reports an error if its
+bounded seed/placement search fails. In wide sets whose maximum key length is at least
+16 bytes, keys that differ only by trailing NUL bytes are currently rejected because
+their zero-padded hash lanes are identical.
+
+The [PR review measurements](docs/pr30_review.md) record the retained compile-time
+improvement, correctness fixes, rejected optimization, and local validation.
 
 
 ## Building

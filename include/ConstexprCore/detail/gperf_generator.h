@@ -19,12 +19,14 @@ constexpr std::size_t next_power_of_2(std::size_t n) {
 // Maximum number of byte positions the gperf-form hash may read. Overridable
 // for experiments (and a preview of per-instance sizing): every container
 // instance embeds MAX_POSITIONS x 256 bytes of asso tables, so right-sizing
-// this is a direct footprint lever. Must stay < 0xFE (mode sentinels).
+// this is a direct footprint lever. Must stay in [1, 0xFE) (mode sentinels).
 #ifdef CONSTEXPRCORE_MAX_POSITIONS
 static constexpr std::size_t MAX_POSITIONS = CONSTEXPRCORE_MAX_POSITIONS;
 #else
 static constexpr std::size_t MAX_POSITIONS = 16;
 #endif
+static_assert(MAX_POSITIONS >= 1 && MAX_POSITIONS < 0xFE,
+              "CONSTEXPRCORE_MAX_POSITIONS must be in [1, 253]");
 static constexpr std::size_t LAST_CHAR = std::size_t(-1);
 
 // Returned by select_positions when no distinguishing position set exists
@@ -171,7 +173,7 @@ consteval bool backtracking_search(
     std::size_t& budget,
     std::size_t modulus)
 {
-    constexpr std::size_t MAX_DEPTH = 8;
+    constexpr std::size_t MAX_DEPTH = MAX_POSITIONS < 8 ? MAX_POSITIONS : 8;
     // Limit candidate breadth to keep search manageable
     std::size_t breadth = num_candidates < 20 ? num_candidates : 20;
 
@@ -287,10 +289,12 @@ consteval std::size_t select_positions(
     }
 
     // Strategy 3: {0, LAST_CHAR}
-    positions[0] = 0;
-    positions[1] = LAST_CHAR;
-    if (positions_distinguish<N>(keys, positions.data(), 2, modulus)) {
-        return 2;
+    if constexpr (MAX_POSITIONS >= 2) {
+        positions[0] = 0;
+        positions[1] = LAST_CHAR;
+        if (positions_distinguish<N>(keys, positions.data(), 2, modulus)) {
+            return 2;
+        }
     }
 
     // Strategy 4: Backtracking search over top candidates
@@ -681,7 +685,7 @@ constexpr std::size_t hd_key_hash_4(std::string_view key) {
 // Legacy name for backward compatibility (4-byte variant).
 constexpr std::size_t hd_key_hash(std::string_view key) { return hd_key_hash_4(key); }
 
-// HD_HASH_2BYTE flag: stored in positions_[2] by the generator when the
+// HD_HASH_2BYTE flag: stored in positions_[0] by the generator when the
 // 2-byte key hash was sufficient. Runtime compute_hash checks this to
 // select the lighter hash variant.
 static constexpr std::size_t HD_HASH_2BYTE_FLAG = 2;
@@ -741,18 +745,10 @@ consteval bool try_hash_and_displace(
     // Signal H&D mode to compute_hash via num_positions = 0xFF sentinel.
     for (std::size_t i = 0; i < 256; ++i) asso_values[0][i] = 0;
 
-    // Use position 0 (first char) and LAST_CHAR (last char) for the bucket hash.
-    // These provide the best discrimination for typical key sets (identifiers,
-    // tickers, keywords) where first and last characters vary the most.
-    std::size_t pos0 = 0;
-    std::size_t pos1 = LAST_CHAR;
-
     // Set num_positions = 0xFF to signal H&D mode to compute_hash.
-    // Store the actual positions in positions[0] and positions[1].
-    // positions[2] stores the key hash variant flag (2-byte or 4-byte).
+    // The bucket hash has fixed positions; only its key-hash variant needs
+    // storage. Use positions[0] so MAX_POSITIONS may be as small as one.
     num_positions = 0xFF; // sentinel for H&D mode
-    positions[0] = pos0;
-    positions[1] = pos1;
 
     // Group by bucket
     std::array<std::size_t, N> key_bucket{};
@@ -825,13 +821,13 @@ consteval bool try_hash_and_displace(
 
     // Try 2-byte key hash first (lighter runtime: 2 rounds instead of 4).
     if (try_placement([](std::string_view k) { return hd_key_hash_2(k); })) {
-        positions[2] = HD_HASH_2BYTE_FLAG;
+        positions[0] = HD_HASH_2BYTE_FLAG;
         return true;
     }
 
     // Fall back to 4-byte key hash (stronger mixing).
     if (try_placement([](std::string_view k) { return hd_key_hash_4(k); })) {
-        positions[2] = HD_HASH_4BYTE_FLAG;
+        positions[0] = HD_HASH_4BYTE_FLAG;
         return true;
     }
 

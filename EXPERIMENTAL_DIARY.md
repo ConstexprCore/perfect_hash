@@ -43,11 +43,12 @@ pointers, which will matter).
 ### Decision 1 — a separate "wide" container, not a widened byte container
 
 Widening every `uint8_t` in `perfect_hash_set` to `uint16_t` would double the hot tables
-for every existing user and still leave the gperf-form hash, whose asso values must
-separate all N keys with ≤ 16 positions × 256 characters of freedom: for 5 581 keys of
-≤ 5 uppercase letters that is ~130 unknowns for 5 581 constraints — a structural dead end
-(the failure atlas measured the wall at 129 keys for realistic sets). The `N > 255` regime
-needs a whole-key hash. So: new headers, same API surface.
+for every existing user and still leave the gperf-form hash and its association-value
+solver. The failure atlas found a practical scaling limit on the tested sets; the
+byte-indexed representation also caps the existing container at 255 keys. Counting
+association variables versus keys does not prove additive hashing impossible with a
+larger range. We chose a whole-key hash and a separate container because that design
+built these large sets with a compact table and cheap lookup.
 
 * `detail/simd16.h` — a 16-byte "chunk" abstraction (page-safe masked load, lane
   extraction, chunk equality) shared by the wide container and the long-key compare.
