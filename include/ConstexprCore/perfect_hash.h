@@ -23,6 +23,25 @@
 #include <ConstexprCore/detail/neon_compare.h>
 #include <ConstexprCore/detail/sse2_compare.h>
 #include <ConstexprCore/detail/lsx_compare.h>
+#include <ConstexprCore/detail/simd16.h>
+#include <ConstexprCore/wide_perfect_hash.h>
+
+// MaxKeyLen > 32: fixed-count 16-byte SIMD chunk comparison (branchless in the
+// key length) instead of the scalar byte loop. On by default wherever a SIMD
+// chunk implementation exists; define to 0 to get the old scalar path back.
+#ifndef CONSTEXPRCORE_USE_SIMD_CHUNKS_FOR_LONG_KEYS
+#if CONSTEXPRCORE_HAS_NEON || CONSTEXPRCORE_HAS_SSE2 || CONSTEXPRCORE_HAS_LSX
+#define CONSTEXPRCORE_USE_SIMD_CHUNKS_FOR_LONG_KEYS 1
+#else
+#define CONSTEXPRCORE_USE_SIMD_CHUNKS_FOR_LONG_KEYS 0
+#endif
+#endif
+
+// MaxKeyLen 17-32: use the shared single-guard chunk compare (default) instead
+// of the per-ISA two-guard *_compare_32 helpers. Define to 0 to compare.
+#ifndef CONSTEXPRCORE_USE_SIMD_CHUNKS_FOR_32
+#define CONSTEXPRCORE_USE_SIMD_CHUNKS_FOR_32 1
+#endif
 
 #ifndef CONSTEXPRCORE_USE_NEON_FOR_32_BYTE_COMPARE
 #if defined(__clang__) && CONSTEXPRCORE_HAS_NEON
@@ -58,17 +77,21 @@ struct perfect_hash_set {
 
     static constexpr std::uint8_t POS_LAST_CHAR = 255;
     static constexpr std::uint8_t HD_MODE = 0xFF; // num_positions_ sentinel for Hash-and-Displace mode
+    static constexpr std::uint8_t FULLHASH_MODE = 0xFE; // num_positions_ sentinel for seeded whole-key-hash mode
     static constexpr bool TABLE_SIZE_IS_POW2 = (TableSize & (TableSize - 1)) == 0;
 
-    // HD_MODE must not collide with a valid num_positions value.
+    // Mode sentinels must not collide with a valid num_positions value.
     static_assert(detail::MAX_POSITIONS < HD_MODE,
                   "MAX_POSITIONS must be < 0xFF to avoid collision with HD_MODE sentinel");
+    static_assert(detail::MAX_POSITIONS < FULLHASH_MODE,
+                  "MAX_POSITIONS must be < 0xFE to avoid collision with FULLHASH_MODE sentinel");
 
     // --- hot data (accessed every lookup) ---
     std::array<std::array<std::uint8_t, 256>, detail::MAX_POSITIONS> asso_values_{};
     std::uint8_t num_positions_{};
     std::array<std::uint8_t, detail::MAX_POSITIONS> positions_{};
     std::uint8_t min_key_len_{};
+    std::uint64_t hash_seed_{};   // FULLHASH_MODE only: seed of the whole-key hash
     std::array<std::uint8_t, TableSize> slot_key_len_{};                    // key length (0xFF = empty)
 #if CONSTEXPRCORE_HAS_NEON || CONSTEXPRCORE_HAS_SSE2 || CONSTEXPRCORE_HAS_LSX
     std::array<std::array<char, (MaxKeyLen + 15)/16 * 16>, TableSize> slot_key_data_{};    // inline key bytes
@@ -203,9 +226,9 @@ struct perfect_hash_set {
         }
 
         // For gperf mode: reduce asso_values mod TableSize (values can be large from bumping).
-        // For H&D mode (num_positions == 0xFF): store raw displacement values (already < 255).
-        if (data.num_positions == 0xFF) {
-            // H&D mode: only one displacement table in asso_values[0]
+        // For H&D / seeded-fullhash modes: store raw displacement values (already < 256).
+        if (data.num_positions == 0xFF || data.num_positions == detail::FULLHASH_SENTINEL) {
+            // Displacement modes: only one table in asso_values[0]
             for (std::size_t i = 0; i < 256; ++i)
                 asso_values_[0][i] = static_cast<std::uint8_t>(data.asso_values[0][i]);
         } else {
@@ -215,6 +238,7 @@ struct perfect_hash_set {
                     asso_values_[pi][i] = static_cast<std::uint8_t>(data.asso_values[pi][i] % TableSize);
         }
         num_positions_ = static_cast<std::uint8_t>(data.num_positions);
+        hash_seed_ = data.seed;
         // Copy positions. For H&D mode (num_positions == 0xFF), only copy
         // the 2 positions used by the bucket hash, not all 255.
         std::size_t pos_count = data.num_positions < detail::MAX_POSITIONS
@@ -240,9 +264,15 @@ struct perfect_hash_set {
     [[nodiscard]] constexpr std::size_t table_size() const noexcept { return TableSize; }
 
     [[nodiscard]] constexpr std::string_view algorithm_name() const noexcept {
-        return num_positions_ == HD_MODE ? std::string_view("H&D") : std::string_view("gperf");
+        return num_positions_ == HD_MODE ? std::string_view("H&D")
+             : num_positions_ == FULLHASH_MODE ? std::string_view("seeded-fullhash")
+             : std::string_view("gperf");
     }
     [[nodiscard]] constexpr std::string algorithm_description() const noexcept {
+        if (num_positions_ == FULLHASH_MODE) {
+            return "seeded-fullhash: h = fh_hash(key, " + std::to_string(hash_seed_) +
+                   "); slot = (asso_values[0][h >> 48 & 0xFF] + h) % " + std::to_string(table_size());
+        }
         if (num_positions_ == HD_MODE) {
             return "Hash-and-Displace: bucket = (key[0] + key[last] + len) & 0xFF; slot = (asso_values[0][bucket] + hd_key_hash(key)) % " + std::to_string(table_size());
         } else {
@@ -397,12 +427,11 @@ struct perfect_hash_set {
                 return std::equal(p, p + len, slot_key_data_[slot].data());
 #endif
             } else if constexpr (MaxKeyLen <= 32) {
-///////////////
-// We disallowed MaxKeyLen > 32 for SIMD-optimized paths since they are not necessarily faster.
-// Set the macros CONSTEXPRCORE_USE_NEON_FOR_32_BYTE_COMPARE and CONSTEXPRCORE_USE_SSE2_FOR_32_BYTE_COMPARE 
-// to enable these paths if desired.
-//////////////
-#if CONSTEXPRCORE_HAS_NEON && CONSTEXPRCORE_USE_NEON_FOR_32_BYTE_COMPARE
+#if CONSTEXPRCORE_USE_SIMD_CHUNKS_FOR_LONG_KEYS && CONSTEXPRCORE_USE_SIMD_CHUNKS_FOR_32
+                // 17-32 bytes: two chunks behind ONE page guard (the per-ISA
+                // *_compare_32 helpers below guard each chunk separately).
+                return detail::compare_chunks<MaxKeyLen>(p, len, slot_key_data_[slot].data());
+#elif CONSTEXPRCORE_HAS_NEON && CONSTEXPRCORE_USE_NEON_FOR_32_BYTE_COMPARE
                 // ARM64 NEON: two-pass 16-byte comparison for MaxKeyLen 17-32.
                 // Replaces pack_input_ + byte loop (~120 insn) with ~10 NEON insn.
                 return detail::neon_compare_32(p, len, slot_key_data_[slot].data());
@@ -436,7 +465,11 @@ struct perfect_hash_set {
                 return std::equal(p, p + len, slot_key_data_[slot].data());
 #endif
             } else {
-#ifdef __clang__
+#if CONSTEXPRCORE_USE_SIMD_CHUNKS_FOR_LONG_KEYS
+                // MaxKeyLen > 32: ceil(MaxKeyLen/16) page-safe masked 16-byte
+                // loads + compares, AND-reduced once. No branch on len.
+                return detail::compare_chunks<MaxKeyLen>(p, len, slot_key_data_[slot].data());
+#elif defined(__clang__)
                 // MaxKeyLen > 32: first 8 bytes packed, then byte loop.
                 std::uint64_t input_val;
                 if consteval {
@@ -485,7 +518,21 @@ struct perfect_hash_set {
     }
 
     [[nodiscard]] constexpr constexprcore_really_inline std::size_t compute_hash(std::string_view key) const noexcept {
-        if (num_positions_ == HD_MODE) {
+        // Single gate for both displacement modes (0xFE fullhash / 0xFF H&D):
+        // normal gperf-mode lookups keep exactly one never-taken branch here.
+        if (num_positions_ >= FULLHASH_MODE) {
+            if (num_positions_ == FULLHASH_MODE) {
+                // Tier-3 mode: seeded whole-key hash + displacement. The hash
+                // reads every byte (8 at a time) — the slow-but-always-works path.
+                const std::uint64_t h = detail::fh_hash(key, hash_seed_);
+                const std::size_t bucket = static_cast<std::size_t>((h >> 48) & 0xFF);
+                const std::size_t s = asso_values_[0][bucket] + static_cast<std::size_t>(h);
+                if constexpr (TABLE_SIZE_IS_POW2)
+                    return s & (TableSize - 1);
+                else
+                    return s % TableSize;
+            }
+            {
             // H&D mode: bucket hash + key hash. positions_[2] selects the key hash variant.
             // The 2-byte variant saves ~10 insn by skipping 2 safe_char rounds.
             std::size_t bucket = detail::hd_bucket_hash(key);
@@ -497,6 +544,7 @@ struct perfect_hash_set {
                 return h & (TableSize - 1);
             else
                 return h % TableSize;
+            }
         }
         // Two hash forms, selected by N:
         //
@@ -517,7 +565,12 @@ struct perfect_hash_set {
         // mispredicts) vs jsreserved (45 keys, does not) vs headers50
         // (50 keys, does not) benchmarks under gcc on x86-64.
         std::size_t h = key.size();
-        if constexpr (N >= 64) {
+        // Branchless mask form when the per-position OOB branches are likely
+        // to be data-dependent: large N exhausts the predictor (TAGE) on
+        // shuffled streams, and long-key sets (MaxKeyLen > 16) tend to select
+        // positions beyond the shortest keys (e.g. Counters: position 8 vs
+        // 6-8-byte keys -> 0.31+ misses/lookup on the branchy form).
+        if constexpr (N >= 64 || MaxKeyLen > 16) {
             const char* kp = key.data();
             const std::size_t klen = key.size();
             for (std::uint8_t i = 0; i < num_positions_; ++i) {
@@ -689,11 +742,41 @@ struct kv {
 // make_perfect_set
 // ============================================================================
 
+// Static-storage key/value arrays for a pack of fixed_strings / kv pairs, so
+// the wide (N > 255) factories can take them as reference template arguments.
+namespace detail {
+template <fixed_string... Keys>
+inline constexpr std::array<std::string_view, sizeof...(Keys)> keys_of_v{Keys.view()...};
+template <typename... KVs>
+inline constexpr std::array<std::string_view, sizeof...(KVs)> kv_keys_v{KVs::key...};
+template <typename ValueT, typename... KVs>
+inline constexpr std::array<ValueT, sizeof...(KVs)> kv_values_v{static_cast<ValueT>(KVs::value)...};
+} // namespace detail
+
+// Container choice, measured in the full benchmark harness (M3 Max, hits):
+//   MaxKeyLen == 1          -> classic (direct 256-entry byte table, ~0.5 ns)
+//   MaxKeyLen 2..7, N >= 8  -> wide    (one 64-bit lane holds key+length, so
+//                              the compare IS the hash input: S&P 100
+//                              1.77 -> 1.32 ns, C++ keywords 1.42 -> 1.32)
+//   tiny N (< 8)            -> classic (fully-predicted branchy hash + a
+//                              one-cache-line table still win: URL protocols
+//                              1.27 classic vs 1.33 wide at N = 6)
+//   MaxKeyLen >= 8          -> classic (two-lane extraction + two multiplies
+//                              lose to 1-2 chosen positions + one vector
+//                              compare: HTTP headers 1.33 classic vs 1.75 wide)
+//   N > 255                 -> wide    (byte-indexed design ends at 255)
+constexpr bool prefer_wide_container(std::size_t n, std::size_t max_len) noexcept {
+    return n > 255 || (n >= 8 && max_len >= 2 && max_len <= 7);
+}
+
 template <fixed_string... Keys>
 consteval auto make_perfect_set() {
     constexpr std::size_t N = sizeof...(Keys);
     static_assert(N > 0, "make_perfect_set requires at least one key");
-
+    constexpr std::size_t MaxLen0 = detail::max_key_length(detail::keys_of_v<Keys...>);
+    if constexpr (prefer_wide_container(N, MaxLen0)) {
+        return make_wide_perfect_set<detail::keys_of_v<Keys...>>();
+    } else {
     constexpr std::array<std::string_view, N> keys{Keys.view()...};
 
     // Validate no duplicates
@@ -710,6 +793,7 @@ consteval auto make_perfect_set() {
     constexpr std::size_t M = data.table_size;
     constexpr std::size_t MaxLen = detail::max_key_length(keys) > 0 ? detail::max_key_length(keys) : 1;
     return perfect_hash_set<N, M, MaxLen>{keys, data};
+    }
 }
 
 // ============================================================================
@@ -745,7 +829,13 @@ template <typename... KVs>
 consteval auto make_perfect_map() {
     constexpr std::size_t N = sizeof...(KVs);
     static_assert(N > 0, "make_perfect_map requires at least one entry");
-
+    using first_kv = typename std::tuple_element<0, std::tuple<KVs...>>::type;
+    using ValueT = decltype(first_kv::value);
+    constexpr std::size_t MaxLen0 = detail::max_key_length(detail::kv_keys_v<KVs...>);
+    if constexpr (prefer_wide_container(N, MaxLen0)) {
+        // See prefer_wide_container above.
+        return make_wide_perfect_map<detail::kv_keys_v<KVs...>, detail::kv_values_v<ValueT, KVs...>>();
+    } else {
     constexpr std::array<std::string_view, N> keys{KVs::key...};
 
     // Validate no duplicates
@@ -757,9 +847,6 @@ consteval auto make_perfect_map() {
         }
     }
 
-    using first_kv = typename std::tuple_element<0, std::tuple<KVs...>>::type;
-    using ValueT = decltype(first_kv::value);
-
     constexpr std::array<ValueT, N> values{static_cast<ValueT>(KVs::value)...};
 
     // Compute PHF once (determines table size + all data)
@@ -767,6 +854,7 @@ consteval auto make_perfect_map() {
     constexpr std::size_t M = data.table_size;
     constexpr std::size_t MaxLen = detail::max_key_length(keys) > 0 ? detail::max_key_length(keys) : 1;
     return perfect_hash_map<N, ValueT, M, MaxLen>{keys, values, data};
+    }
 }
 
 } // namespace ConstexprCore

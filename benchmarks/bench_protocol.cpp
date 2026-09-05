@@ -37,7 +37,7 @@
 // Filter support: --filter hits,make_perfect_map,protocol
 //   Workloads: hits, misses, mixed
 //   Methods:   make_perfect_map, naive, unordered_map, ankerl, absl, frozen, kronuz, gperf, pthash
-//   Keysets:   protocol, stock, keyword, header, mime, letters, headers50, jsreserved, counters
+//   Keysets:   protocol, stock, keyword, header, mime, letters, headers50, jsreserved, counters, fqcn
 // Omitting a category means "run all" for that category.
 // ============================================================================
 
@@ -61,7 +61,7 @@ BenchFilter parse_filter(const std::string &arg) {
   BenchFilter f;
   static const std::set<std::string> valid_workloads = {"hits", "misses", "mixed"};
   static const std::set<std::string> valid_methods = {"make_perfect_map", "naive", "unordered_map", "ankerl", "absl", "frozen", "kronuz", "gperf", "pthash"};
-  static const std::set<std::string> valid_keysets = {"protocol", "stock", "keyword", "header", "mime", "letters", "headers50", "jsreserved", "counters"};
+  static const std::set<std::string> valid_keysets = {"protocol", "stock", "keyword", "header", "mime", "letters", "headers50", "jsreserved", "counters", "fqcn"};
 
   size_t start = 0;
   while (start < arg.size()) {
@@ -1071,6 +1071,48 @@ auto gperf_counters_fn = [](std::string_view s) -> std::optional<int> {
 };
 
 // ============================================================================
+// Key set 10: Java fully-qualified class names (40 keys, MaxKeyLen=54)
+// Long keys: exercises the MaxKeyLen > 32 comparison path (SIMD chunks vs the
+// old scalar byte loop — toggle with CONSTEXPRCORE_USE_SIMD_CHUNKS_FOR_LONG_KEYS).
+// ============================================================================
+#include "data/fqcn_keys.inc"
+namespace gperf_fqcn {
+#include "fqcn_gperf.inc"
+}
+
+static constexpr auto fqcn_phf = ConstexprCore::make_perfect_map<FQCN_KV_LIST>();
+
+static constexpr frozen::unordered_map<frozen::string, int, 40> fqcn_frozen = {
+FQCN_FROZEN_LIST
+};
+
+static constexpr auto fqcn_kronuz = [] {
+  fnv1ah32 h{};
+  return phf::make_phf({
+FQCN_KRONUZ_LIST
+  });
+}();
+
+std::optional<int> fqcn_naive(std::string_view s) {
+  // Binary search over the sorted keys, returning the declaration index.
+  static const auto sorted = []() {
+    std::array<std::pair<std::string_view, int>, 40> a;
+    for (int i = 0; i < 40; ++i) a[i] = {fqcn_keys[i], i};
+    std::sort(a.begin(), a.end());
+    return a;
+  }();
+  auto it = std::lower_bound(sorted.begin(), sorted.end(), s,
+                             [](const auto& e, std::string_view k) { return e.first < k; });
+  if (it != sorted.end() && it->first == s) return it->second;
+  return std::nullopt;
+}
+
+auto gperf_fqcn_fn = [](std::string_view s) -> std::optional<int> {
+  auto r = gperf_fqcn::FqcnGperf::lookup(s.data(), s.size());
+  return r ? std::optional<int>(static_cast<int>(r[0])) : std::nullopt;
+};
+
+// ============================================================================
 // Verification
 // ============================================================================
 
@@ -1189,7 +1231,7 @@ int main(int argc, char *argv[]) {
       std::println("Filter tokens (mix and match):");
       std::println("  Workloads: hits, misses, mixed");
       std::println("  Methods:   make_perfect_map, naive, unordered_map, ankerl, absl, frozen, kronuz, gperf, pthash");
-      std::println("  Keysets:   protocol, stock, keyword, header, mime, letters, headers50, jsreserved, counters\n");
+      std::println("  Keysets:   protocol, stock, keyword, header, mime, letters, headers50, jsreserved, counters, fqcn\n");
       std::println("Omitting a category runs all values for that category.\n");
       std::println("Examples:");
       std::println("  {} --filter hits,make_perfect_map,protocol", argv[0]);
@@ -1313,6 +1355,9 @@ int main(int argc, char *argv[]) {
        "retries","bytes_processed","records_read","records_matched","records_written"},
       {"records_validated","total_bytes","processed_bytes","failed_requests","invalid_records",
        "total_records","matched_records","written_records","ok_count","error_count"});
+    all_ok &= verify_keyset("Java FQCNs", fqcn_phf, fqcn_naive, fqcn_frozen, fqcn_kronuz, gperf_fqcn_fn,
+      std::vector<std::string_view>(fqcn_keys.begin(), fqcn_keys.end()),
+      std::vector<std::string_view>(fqcn_miss_keys.begin(), fqcn_miss_keys.end()));
     return all_ok ? 0 : 1;
   }
 
@@ -1430,6 +1475,14 @@ int main(int argc, char *argv[]) {
        "retries","bytes_processed","records_read","records_matched","records_written"},
       {"records_validated","total_bytes","processed_bytes","failed_requests","invalid_records",
        "total_records","matched_records","written_records","ok_count","error_count"},
+      filter, describe);
+  }
+
+  // --- Java FQCNs (40 keys, 24-54 chars: the > 32-byte compare path) ---
+  if (filter.run_keyset("fqcn")) {
+    run_keyset("Java FQCNs", fqcn_phf, fqcn_naive, fqcn_frozen, fqcn_kronuz, gperf_fqcn_fn,
+      std::vector<std::string_view>(fqcn_keys.begin(), fqcn_keys.end()),
+      std::vector<std::string_view>(fqcn_miss_keys.begin(), fqcn_miss_keys.end()),
       filter, describe);
   }
 }

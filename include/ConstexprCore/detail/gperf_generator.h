@@ -4,6 +4,8 @@
 #include <array>
 #include <string_view>
 #include <cstddef>
+#include <cstdint>
+#include <cstring>
 
 namespace ConstexprCore::detail {
 
@@ -14,8 +16,27 @@ constexpr std::size_t next_power_of_2(std::size_t n) {
     return p;
 }
 
+// Maximum number of byte positions the gperf-form hash may read. Overridable
+// for experiments (and a preview of per-instance sizing): every container
+// instance embeds MAX_POSITIONS x 256 bytes of asso tables, so right-sizing
+// this is a direct footprint lever. Must stay < 0xFE (mode sentinels).
+#ifdef CONSTEXPRCORE_MAX_POSITIONS
+static constexpr std::size_t MAX_POSITIONS = CONSTEXPRCORE_MAX_POSITIONS;
+#else
 static constexpr std::size_t MAX_POSITIONS = 16;
+#endif
 static constexpr std::size_t LAST_CHAR = std::size_t(-1);
+
+// Returned by select_positions when no distinguishing position set exists
+// within MAX_POSITIONS (or the bounded search could not find one). Callers
+// treat it as "this tier cannot handle the key set" and fall through to the
+// next generator instead of aborting the whole consteval search: a throw in
+// C++23 constant evaluation cannot be caught, so failure must be a value.
+static constexpr std::size_t POSITION_SEARCH_FAILED = std::size_t(-2);
+
+// num_positions sentinel for the tier-3 seeded whole-key-hash mode.
+// (0xFF is Hash-and-Displace; both must stay above MAX_POSITIONS.)
+static constexpr std::size_t FULLHASH_SENTINEL = 0xFE;
 
 // Round up to next power of two
 consteval std::size_t next_power_of_two(std::size_t n) {
@@ -303,7 +324,10 @@ consteval std::size_t select_positions(
         }
     }
 
-    throw "Failed to find distinguishing positions for perfect hash";
+    // No distinguishing set within MAX_POSITIONS (e.g. 18 same-length keys
+    // pairwise differing at 18 scattered positions need a 17-position vertex
+    // cover). Report failure as a value so later tiers can still run.
+    return POSITION_SEARCH_FAILED;
 }
 
 // Partition-based asso_values search, inspired by GNU gperf.
@@ -333,6 +357,7 @@ consteval bool try_generate_gperf(
 {
     // Phase 1: Position selection (use M as modulus since hash computes % M)
     num_positions = select_positions<N>(keys, positions, M);
+    if (num_positions == POSITION_SEARCH_FAILED) return false;
 
     // Initialize all asso_values to 0.
     for (std::size_t p = 0; p < MAX_POSITIONS; ++p)
@@ -551,6 +576,7 @@ struct phf_result {
     std::size_t num_positions{};
     std::array<std::size_t, MAX_POSITIONS> positions{};
     std::array<std::size_t, MAX_TABLE_SIZE> slot_to_key{};
+    std::size_t seed{};   // tier-3 (seeded whole-key hash) seed; 0 otherwise
 };
 
 // Try a specific table size M. On success, fills result and returns true.
@@ -688,8 +714,12 @@ consteval bool try_hash_and_displace(
     std::array<std::size_t, MAX_POSITIONS>& positions,
     std::array<std::size_t, M>& slot_to_key)
 {
-    // Phase 1: Position selection (reuse existing logic)
-    num_positions = select_positions<N>(keys, positions, M);
+    // Phase 1: if lengths alone distinguish (mod M), use the simple path.
+    // H&D never uses selected positions otherwise — its bucket features are
+    // fixed (first/last/len) — so running the expensive position search here
+    // was pure waste (and, on position-wall key sets, burned the whole
+    // backtracking budget once per table size before failing).
+    num_positions = positions_distinguish<N>(keys, nullptr, 0, M) ? 0 : 1;
 
     // Phase 2: Group keys by the character at the first selected position.
     // This character's asso_value will be the "displacement" for the group.
@@ -854,27 +884,243 @@ consteval phf_result<N> compute_phf_hd_po2(
     }
 }
 
-// Compute PHF for the given keys.
-// Strategy: try the partition-based gperf algorithm first (produces smaller,
-// faster hash functions), capped at table size 256 to stay within uint8_t.
-// Falls back to Hash-and-Displace for large N or if gperf cannot find a
-// solution at the available table sizes.
+
+// ============================================================================
+// Tier-3 generator: seeded whole-key hash + displacement ("seeded CHD").
+//
+// gperf-form and Hash-and-Displace both read a bounded, FIXED set of byte
+// features (up to MAX_POSITIONS chosen positions; first/last/len + first
+// four bytes, respectively). Key sets that spread their information across
+// more positions than either can see are unbuildable at ANY table size —
+// e.g. 18 same-length keys pairwise differing at 18 scattered positions, or
+// high-load sets where two same-bucket keys happen to have key-hashes
+// congruent mod M (collide at every displacement).
+//
+// This tier hashes EVERY byte of the key under a seed, and the seed is the
+// escape hatch: if the draw produces a congruent same-bucket pair, re-roll
+// instead of giving up. Runtime shape stays H&D-like:
+//     h      = fh_hash(key, seed)                (whole key, 64-bit)
+//     bucket = (h >> 48) & 0xFF
+//     slot   = (asso_values[0][bucket] + h) % M
+// ============================================================================
+
+// Chunk-folded 64-bit hash over the whole key. Identical at consteval and
+// runtime BY CONSTRUCTION: the key is consumed as little-endian 8-byte
+// chunks (zero-padded tail) — assembled per byte at consteval, loaded with
+// one memcpy at runtime. (Little-endian targets only: the same assumption
+// the packed_keys_ comparison paths already make.)
+constexpr std::uint64_t fh_load_chunk(const char* p, std::size_t len, std::size_t off) {
+    if consteval {
+        std::uint64_t c = 0;
+        for (std::size_t b = 0; b < 8 && off + b < len; ++b)
+            c |= static_cast<std::uint64_t>(static_cast<unsigned char>(p[off + b])) << (8 * b);
+        return c;
+    } else {
+        if (off + 8 <= len) {
+            std::uint64_t c;
+            std::memcpy(&c, p + off, 8);
+            return c;
+        }
+        std::uint64_t c = 0;
+        for (std::size_t b = 0; b < 8 && off + b < len; ++b)
+            c |= static_cast<std::uint64_t>(static_cast<unsigned char>(p[off + b])) << (8 * b);
+        return c;
+    }
+}
+
+constexpr std::uint64_t fh_hash(std::string_view key, std::uint64_t seed) {
+    std::uint64_t h = seed ^ (0x9E3779B97F4A7C15ULL * (static_cast<std::uint64_t>(key.size()) + 1));
+    for (std::size_t off = 0; off < key.size(); off += 8) {
+        h = (h ^ fh_load_chunk(key.data(), key.size(), off)) * 0x9E3779B97F4A7C15ULL;
+        h ^= h >> 32;
+    }
+    // Final avalanche (murmur3 fmix64): both the bucket bits (>>48) and the
+    // low slot bits must be well mixed.
+    h ^= h >> 33; h *= 0xFF51AFD7ED558CCDULL;
+    h ^= h >> 33; h *= 0xC4CEB9FE1A85EC53ULL;
+    h ^= h >> 33;
+    return h;
+}
+
+template <std::size_t N, std::size_t M>
+consteval bool try_seeded_fullhash(
+    const std::array<std::string_view, N>& keys,
+    std::array<std::array<std::size_t, 256>, MAX_POSITIONS>& asso_values,
+    std::size_t& num_positions,
+    std::array<std::size_t, M>& slot_to_key,
+    std::size_t& seed_out)
+{
+    // Observed seeds are almost always 0-2 (a dead pair at M=256 has ~1-23%
+    // probability per seed depending on N); 512 gives astronomical headroom
+    // while bounding consteval work.
+    constexpr std::size_t MAX_SEEDS = 512;
+    for (std::size_t seed = 0; seed < MAX_SEEDS; ++seed) {
+        std::array<std::uint64_t, N> h{};
+        std::array<std::size_t, N> bucket{};
+        for (std::size_t i = 0; i < N; ++i) {
+            h[i] = fh_hash(keys[i], seed);
+            bucket[i] = static_cast<std::size_t>((h[i] >> 48) & 0xFF);
+        }
+        // Dead-pair pre-check: two same-bucket keys congruent mod M can never
+        // be separated by any displacement — re-roll the seed immediately
+        // instead of running a doomed placement search.
+        bool dead = false;
+        for (std::size_t i = 0; i < N && !dead; ++i)
+            for (std::size_t j = i + 1; j < N; ++j)
+                if (bucket[i] == bucket[j] && (h[i] % M) == (h[j] % M)) { dead = true; break; }
+        if (dead) continue;
+
+        // Group keys by bucket, place largest buckets first (most constrained),
+        // greedy displacement search — the same machinery as Hash-and-Displace.
+        struct binfo { std::size_t ch; std::size_t count; };
+        std::array<binfo, N> buckets{};
+        std::size_t num_buckets = 0;
+        for (std::size_t i = 0; i < N; ++i) {
+            bool found = false;
+            for (std::size_t b = 0; b < num_buckets; ++b)
+                if (buckets[b].ch == bucket[i]) { ++buckets[b].count; found = true; break; }
+            if (!found) buckets[num_buckets++] = {bucket[i], 1};
+        }
+        for (std::size_t i = 0; i < num_buckets; ++i)
+            for (std::size_t j = i + 1; j < num_buckets; ++j)
+                if (buckets[j].count > buckets[i].count) {
+                    auto tmp = buckets[i]; buckets[i] = buckets[j]; buckets[j] = tmp;
+                }
+
+        for (std::size_t i = 0; i < M; ++i) slot_to_key[i] = N;
+        std::array<std::size_t, 256> disp{};
+        bool ok_all = true;
+        for (std::size_t b = 0; b < num_buckets && ok_all; ++b) {
+            std::size_t ch = buckets[b].ch;
+            std::array<std::size_t, N> bkeys{};
+            std::size_t bk = 0;
+            for (std::size_t i = 0; i < N; ++i)
+                if (bucket[i] == ch) bkeys[bk++] = i;
+            bool placed = false;
+            constexpr std::size_t max_d = M < 256 ? M : 256;
+            for (std::size_t d = 0; d < max_d && !placed; ++d) {
+                bool ok = true;
+                std::array<std::size_t, N> bslots{};
+                for (std::size_t k = 0; k < bk; ++k) {
+                    std::size_t slot = (d + static_cast<std::size_t>(h[bkeys[k]])) % M;
+                    if (slot_to_key[slot] != N) { ok = false; break; }
+                    for (std::size_t k2 = 0; k2 < k; ++k2)
+                        if (bslots[k2] == slot) { ok = false; break; }
+                    if (!ok) break;
+                    bslots[k] = slot;
+                }
+                if (ok) {
+                    disp[ch] = d;
+                    for (std::size_t k = 0; k < bk; ++k)
+                        slot_to_key[bslots[k]] = bkeys[k];
+                    placed = true;
+                }
+            }
+            if (!placed) ok_all = false;
+        }
+        if (!ok_all) continue;   // displacement failed despite no dead pair: next seed
+
+        for (std::size_t i = 0; i < 256; ++i) asso_values[0][i] = disp[i];
+        num_positions = FULLHASH_SENTINEL;
+        seed_out = seed;
+        return true;
+    }
+    return false;
+}
+
+// Tier-3 for a specific table size M, filling a phf_result.
+template <std::size_t N, std::size_t M>
+consteval bool try_compute_phf_fh(
+    const std::array<std::string_view, N>& keys,
+    phf_result<N>& result)
+{
+    static_assert(M <= phf_result<N>::MAX_TABLE_SIZE, "Table size M exceeds maximum");
+    std::array<std::array<std::size_t, 256>, MAX_POSITIONS> asso{};
+    std::size_t npos{};
+    std::array<std::size_t, M> s2k{};
+    std::size_t seed{};
+    if (try_seeded_fullhash<N, M>(keys, asso, npos, s2k, seed)) {
+        result.table_size = M;
+        result.asso_values = asso;
+        result.num_positions = npos;
+        result.seed = seed;
+        for (std::size_t i = 0; i < M; ++i) result.slot_to_key[i] = s2k[i];
+        for (std::size_t i = M; i < phf_result<N>::MAX_TABLE_SIZE; ++i)
+            result.slot_to_key[i] = N;
+        return true;
+    }
+    return false;
+}
+
+template <std::size_t N, std::size_t M, std::size_t MaxM>
+consteval bool try_fh_po2(
+    const std::array<std::string_view, N>& keys,
+    phf_result<N>& result)
+{
+    if (try_compute_phf_fh<N, M>(keys, result)) return true;
+    constexpr std::size_t NextM = M * 2;
+    if constexpr (NextM <= MaxM) return try_fh_po2<N, NextM, MaxM>(keys, result);
+    return false;
+}
+
+// Bool-returning, capped power-of-2 search for Hash-and-Displace, mirroring
+// try_gperf_po2 (compute_phf_hd_po2 above throws and explores sizes beyond
+// what the byte-indexed container can hold — see compute_phf).
+template <std::size_t N, std::size_t M, std::size_t MaxM>
+consteval bool try_hd_po2(
+    const std::array<std::string_view, N>& keys,
+    phf_result<N>& result)
+{
+    if (try_compute_phf_hd<N, M>(keys, result)) return true;
+    constexpr std::size_t NextM = M * 2;
+    if constexpr (NextM <= MaxM) return try_hd_po2<N, NextM, MaxM>(keys, result);
+    return false;
+}
+
+// Compute PHF for the given keys — three tiers, cheapest runtime hash first:
+//   1. gperf partition solver   (len + 1-2 asso loads; ~4 instructions)
+//   2. Hash-and-Displace        (first/last/len bucket + 2-4 byte key hash)
+//   3. seeded whole-key hash    (reads every byte; seed escapes structural
+//                                collisions; near-certain to succeed)
+// ALL tiers are capped at table size 256: everything the runtime container
+// stores is byte-indexed, so no larger table can ever be instantiated —
+// "succeeding" at 512+ used to surface as a misleading TableSize assert.
 template <std::size_t N>
 consteval phf_result<N> compute_phf(const std::array<std::string_view, N>& keys) {
+    // Duplicate keys can never be separated by ANY hash. Diagnose them here:
+    // the factory-level checks cannot fire first, because
+    // `constexpr auto data = compute_phf(...)` is evaluated at instantiation,
+    // before the factory body's own statements run.
+    for (std::size_t i = 0; i < N; ++i)
+        for (std::size_t j = i + 1; j < N; ++j)
+            if (keys[i] == keys[j])
+                throw "perfect_hash: duplicate key in key set";
+
     constexpr std::size_t StartM = next_power_of_2(N);
-    // The runtime perfect_hash_set uses uint8_t for asso_values (reduced
-    // mod TableSize, so 0..TableSize-1 fits whenever TableSize <= 256) and
-    // slot_to_key entries are key indices (< N <= 255).  Cap gperf attempts
-    // at 256 (the largest power of 2 that fits).
-    constexpr std::size_t GPERF_MAX_TABLE =
+    constexpr std::size_t CAP =
         phf_result<N>::MAX_TABLE_SIZE < 256 ? phf_result<N>::MAX_TABLE_SIZE : 256;
-    if constexpr (StartM <= GPERF_MAX_TABLE) {
-        phf_result<N> result{};
-        if (try_gperf_po2<N, StartM, GPERF_MAX_TABLE>(keys, result))
-            return result;
+    static_assert(StartM <= CAP, "N must be <= 255 (uint8_t indices)");
+
+    phf_result<N> result{};
+    // Pre-flight the position search ONCE at the largest table. The set of
+    // key pairs needing position coverage at size M is { (i,j) : len_i ≡
+    // len_j (mod M) }, and for power-of-two sizes M' < M that set only grows
+    // (len_i ≡ mod M implies ≡ mod M'). So if no distinguishing set exists
+    // at CAP, none exists at any smaller size — skip the whole gperf tier
+    // instead of re-burning the search budget at every size.
+    bool positions_possible;
+    {
+        std::array<std::size_t, MAX_POSITIONS> pre_pos{};
+        positions_possible =
+            (select_positions<N>(keys, pre_pos, CAP) != POSITION_SEARCH_FAILED);
     }
-    // Fall back to Hash-and-Displace.
-    return compute_phf_hd_po2<N, StartM>(keys);
+    if (positions_possible) {
+        if (try_gperf_po2<N, StartM, CAP>(keys, result)) return result;
+    }
+    if (try_hd_po2<N, StartM, CAP>(keys, result)) return result;
+    if (try_fh_po2<N, StartM, CAP>(keys, result)) return result;
+    throw "perfect_hash: no perfect hash fits in <= 256 slots for this key set "
+          "(gperf, hash-and-displace, and seeded whole-key hashing all failed)";
 }
 
 } // namespace ConstexprCore::detail

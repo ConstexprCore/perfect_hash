@@ -76,6 +76,47 @@ std::optional<Method> parse_method(std::string_view s) {
 }
 ```
 
+### Large key sets (more than 255 keys)
+
+The same two factories keep working past 255 entries: they switch to the *wide* container
+(`wide_perfect_hash_set` / `wide_perfect_hash_map`, header `wide_perfect_hash.h`), which
+replaces gperf's chosen byte positions with a whole-key multiplicative hash plus a small
+per-bucket pilot table — a compile-time PTHash. Every lookup is one multiply, one 16-bit
+pilot load and one key load; values that fit in the spare bytes of a short key are stored
+inside the key word itself. For generated key lists, pass a static-storage array by
+reference:
+
+```cpp
+#include <ConstexprCore/wide_perfect_hash.h>
+
+inline constexpr std::array<std::string_view, 5581> nasdaq_symbols = { "AAAP", "AACG", /* ... */ };
+
+// values = declaration index, in the smallest integer type that fits
+constexpr auto tickers = ConstexprCore::make_wide_perfect_index_map<nasdaq_symbols>();
+
+// or with your own values
+inline constexpr std::array<int, 5581> ids = { /* ... */ };
+constexpr auto tickers2 = ConstexprCore::make_wide_perfect_map<nasdaq_symbols, ids>();
+
+std::optional<std::uint16_t> id = tickers.lookup("AAPL");   // ~1.7 ns on an M3 Max
+```
+
+Measured (Apple M3 Max, shuffled hits): S&P 500 (503 symbols) **1.2 ns**, all Nasdaq-listed
+symbols (5 581) **1.7 ns** — versus 2.4 / 3.0 ns for packing the symbol into a `uint64_t`
+and probing `absl::flat_hash_map`, 4.8 / 5.9 ns for a 27-ary array trie, and 7.6 / 6.6 ns
+for `absl::flat_hash_map<std::string_view, int>`. Building the 5 581-key map takes ~5 s of
+compile time; raise `-fconstexpr-steps` (clang) / `-fconstexpr-ops-limit` (GCC) as the
+benchmarks' `CMakeLists.txt` does.
+
+### Long keys (more than 32 bytes)
+
+Keys of any length up to 4 080 bytes are verified with a fixed number of 16-byte SIMD
+chunk compares — no loop over characters, no branch on the length; 17–32-byte keys are
+compared fully branch-free (shift-realigned loads, safe for any input address). 40
+fully-qualified Java class names (24–54 bytes): **2.05 ns** per lookup, where the
+previous scalar byte loop took 23 ns. Short keys (≤ 7 bytes) in sets of 8+ keys also
+route to the wide container automatically — the S&P 100 drops from 1.77 to 1.32 ns.
+
 
 ## Building
 

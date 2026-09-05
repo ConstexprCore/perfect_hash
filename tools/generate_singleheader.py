@@ -6,13 +6,9 @@ import argparse
 from pathlib import Path
 
 
-COMMENTED_INCLUDES = {
-    "#include <ConstexprCore/fixed_string.h>",
-    "#include <ConstexprCore/detail/gperf_generator.h>",
-    "#include <ConstexprCore/detail/neon_compare.h>",
-    "#include <ConstexprCore/detail/sse2_compare.h>",
-    "#include <ConstexprCore/detail/lsx_compare.h>",
-}
+# Every intra-library include is commented out in the bundle; the bundling
+# order below guarantees each header's dependencies precede it.
+INTRA_INCLUDE_PREFIX = "#include <ConstexprCore/"
 
 
 def read_text(path: Path) -> str:
@@ -23,7 +19,7 @@ def rewrite_perfect_hash(text: str) -> str:
     out_lines: list[str] = []
     for line in text.splitlines():
         stripped = line.strip()
-        if stripped in COMMENTED_INCLUDES:
+        if stripped.startswith(INTRA_INCLUDE_PREFIX):
             out_lines.append(f"// bundled in single-header: {stripped}")
         else:
             out_lines.append(line)
@@ -46,7 +42,10 @@ def main() -> int:
     parser.add_argument("--neon-compare", required=True)
     parser.add_argument("--sse2-compare", required=True)
     parser.add_argument("--lsx-compare", required=True)
+    parser.add_argument("--simd16", required=True)
+    parser.add_argument("--wide-generator", required=True)
     parser.add_argument("--perfect-hash", required=True)
+    parser.add_argument("--wide-perfect-hash", required=True)
     args = parser.parse_args()
 
     output_path = Path(args.output)
@@ -55,8 +54,11 @@ def main() -> int:
         ("detail/gperf_generator.h", Path(args.gperf_generator), False),
         ("detail/neon_compare.h", Path(args.neon_compare), False),
         ("detail/sse2_compare.h", Path(args.sse2_compare), False),
-        ("detail/lsx_compare.h", Path(args.lsx_compare), False),
+        ("detail/lsx_compare.h", Path(args.lsx_compare), True),
+        ("detail/simd16.h", Path(args.simd16), True),
+        ("detail/wide_generator.h", Path(args.wide_generator), True),
         ("perfect_hash.h", Path(args.perfect_hash), True),
+        ("wide_perfect_hash.h", Path(args.wide_perfect_hash), True),
     ]
 
     parts = [
