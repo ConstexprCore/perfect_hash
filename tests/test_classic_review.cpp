@@ -1,3 +1,4 @@
+#include <ostream>
 #include <doctest/doctest.h>
 #include <ConstexprCore/perfect_hash.h>
 

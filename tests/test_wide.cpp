@@ -1,4 +1,5 @@
 // Tests for the wide (N > 255) container and the > 32-byte comparison path.
+#include <ostream>
 #include <doctest/doctest.h>
 #include <ConstexprCore/perfect_hash.h>
 #include <ConstexprCore/wide_perfect_hash.h>
