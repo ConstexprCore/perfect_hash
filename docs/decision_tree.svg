@@ -1,0 +1,95 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1180" height="820" viewBox="0 0 1180 820" font-family="Helvetica, Arial, sans-serif" font-size="13">
+  <defs>
+    <marker id="arr" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#555"/></marker>
+    <style>
+      .q  { fill:#fff6d6; stroke:#c9a227; stroke-width:1.5; }
+      .us { fill:#e3f6e3; stroke:#2e8b3d; stroke-width:1.5; }
+      .ot { fill:#eeeeee; stroke:#888;    stroke-width:1.5; }
+      .t  { fill:#1a1a1a; }
+      .s  { fill:#555; font-size:11px; }
+      .l  { fill:#8a6d00; font-size:11.5px; font-weight:bold; }
+      .e  { stroke:#555; stroke-width:1.4; fill:none; marker-end:url(#arr); }
+    </style>
+  </defs>
+  <text x="590" y="28" text-anchor="middle" font-size="19" font-weight="bold" class="t">When to use the compile-time perfect hash — and which mode you get</text>
+  <text x="590" y="47" text-anchor="middle" class="s">numbers: Apple M3 Max, shuffled hits, ns per lookup · francisco/experimental, 2026-08-31</text>
+
+  <!-- Q1 -->
+  <rect x="440" y="70" width="300" height="46" rx="8" class="q"/>
+  <text x="590" y="90" text-anchor="middle" class="t">Is the key set known when you write the code?</text>
+  <text x="590" y="106" text-anchor="middle" class="s">(protocol verbs, header names, struct fields, a symbol universe)</text>
+
+  <!-- no -> runtime -->
+  <path d="M740,93 L880,93" class="e"/><text x="800" y="86" class="l">no</text>
+  <rect x="880" y="66" width="290" height="56" rx="8" class="ot"/>
+  <text x="1025" y="84" text-anchor="middle" class="t">runtime table</text>
+  <text x="1025" y="100" text-anchor="middle" class="s">absl::flat_hash_map; ≤8-byte symbols: pack into u64 first</text>
+  <text x="1025" y="116" text-anchor="middle" class="s">(2.4–3.0 ns on tickers, 6–8 ns on strings)</text>
+
+  <!-- yes -> Q2 -->
+  <path d="M590,116 L590,150" class="e"/><text x="600" y="138" class="l">yes</text>
+  <rect x="465" y="150" width="250" height="40" rx="8" class="q"/>
+  <text x="590" y="175" text-anchor="middle" class="t">Are all keys a single byte?</text>
+
+  <path d="M715,170 L880,170" class="e"/><text x="800" y="163" class="l">yes</text>
+  <rect x="880" y="146" width="290" height="52" rx="8" class="us"/>
+  <text x="1025" y="166" text-anchor="middle" class="t">make_perfect_set: direct 256-entry table</text>
+  <text x="1025" y="182" text-anchor="middle" class="s">0.5 ns — a plain if/switch on the byte ties it (0.4 ns)</text>
+
+  <!-- no -> Q3 -->
+  <path d="M590,190 L590,224" class="e"/><text x="600" y="212" class="l">no</text>
+  <rect x="465" y="224" width="250" height="40" rx="8" class="q"/>
+  <text x="590" y="249" text-anchor="middle" class="t">How many keys?</text>
+
+  <!-- left branch: <= 255 -->
+  <path d="M465,244 L330,244 L330,300" class="e"/><text x="330" y="238" class="l">classic shapes</text>
+  <rect x="110" y="300" width="440" height="92" rx="8" class="us"/>
+  <text x="330" y="320" text-anchor="middle" class="t" font-weight="bold">classic mode: N ≤ 255 with keys ≥ 8 B, or tiny sets (N &lt; 8)</text>
+  <text x="330" y="338" text-anchor="middle" class="s">hash = len + asso[pos₁][k[pos₁]] (+ …), 1–2 chosen bytes, 4 instructions</text>
+  <text x="330" y="354" text-anchor="middle" class="s">tiers picked automatically: gperf → hash-and-displace → seeded whole-key</text>
+  <text x="330" y="370" text-anchor="middle" class="s">1.27–2.05 ns; 0.00 branch misses on every set incl. Counters</text>
+  <text x="330" y="386" text-anchor="middle" class="s">N ≥ ~50: set -fconstexpr-steps (clang default ≈ 1 M steps)</text>
+
+  <!-- right branch: > 255 -->
+  <path d="M715,244 L850,244 L850,300" class="e"/><text x="725" y="238" class="l">wide shapes</text>
+  <rect x="630" y="300" width="440" height="92" rx="8" class="us"/>
+  <text x="850" y="320" text-anchor="middle" class="t" font-weight="bold">wide mode: N &gt; 255, or short keys (≤ 7 B) with N ≥ 8</text>
+  <text x="850" y="338" text-anchor="middle" class="s">whole-key multiply → bucket → u16 pilot → slot; verified at compile time</text>
+  <text x="850" y="354" text-anchor="middle" class="s">S&amp;P 100 1.32 · S&amp;P 500 1.27 · all 5 581 Nasdaq symbols 1.73 (36–40 instr)</text>
+  <text x="850" y="370" text-anchor="middle" class="s">generated lists: make_wide_perfect_index_map&lt;array&gt;() — 5 s compile @ 5 581</text>
+  <text x="850" y="386" text-anchor="middle" class="s">beyond 65 535 keys or 4 080-byte keys: pthash / absl at run time</text>
+
+  <!-- key-length ladder, classic -->
+  <path d="M330,392 L330,430" class="e"/>
+  <rect x="100" y="430" width="460" height="120" rx="8" class="q"/>
+  <text x="330" y="450" text-anchor="middle" class="t">How long is the longest key? (verification strategy, chosen by MaxKeyLen)</text>
+  <text x="115" y="472" class="s">≤ 4 B  → two overlapping halfword loads + length, one 64-bit compare</text>
+  <text x="115" y="490" class="s">≤ 8 B  → page-safe 16-B load, tbl mask, one 64-bit compare (tickers: 1.8 ns @100)</text>
+  <text x="115" y="508" class="s">≤ 16 B → tbl mask + cmeq, one vector compare (HTTP headers: 1.3 ns)</text>
+  <text x="115" y="526" class="s">17–32 B → 2 chunks, branch-free for any address (Headers50 1.89, Counters 1.85)</text>
+  <text x="115" y="544" class="s">&gt; 32 B → ⌈L/16⌉ chunks, sliding masks, one guard (Java FQCNs 54 B: 2.05 ns; was 23 ns)</text>
+
+  <!-- key-length ladder, wide -->
+  <path d="M850,392 L850,430" class="e"/>
+  <rect x="620" y="430" width="460" height="120" rx="8" class="q"/>
+  <text x="850" y="450" text-anchor="middle" class="t">How long is the longest key? (wide mode)</text>
+  <text x="640" y="472" class="s">≤ 7 B  → one 64-bit lane, length in the top byte; compare = eor + tst</text>
+  <text x="640" y="490" class="s">          value ≤ 16 bit fits in the spare bytes → fused, no value table</text>
+  <text x="640" y="508" class="s">≤ 15 B → two lanes (ldp), length in lane 1's top byte</text>
+  <text x="640" y="526" class="s">16 B … 4 080 B → hash over all lanes, ⌈L/16⌉-chunk compare + length</text>
+  <text x="640" y="544" class="s">every byte of the key feeds the hash: no position search, no 16-position wall</text>
+
+  <!-- workload note -->
+  <rect x="120" y="590" width="940" height="88" rx="8" class="ot"/>
+  <text x="590" y="612" text-anchor="middle" class="t" font-weight="bold">What the numbers assume — and where every table looks the same</text>
+  <text x="140" y="634" class="s">• Hits or misses only: 0.00–0.01 branch misses per lookup, ~5–7 cycles. Misses are slightly faster than hits (the compare rejects; nothing else is fetched).</text>
+  <text x="140" y="652" class="s">• Random 50/50 hit/miss streams: every structure pays the caller's `if (found)` mispredict (~15 cycles). Ours: 7.7 ns @ S&amp;P 500 vs 8–12 ns for the field.</text>
+  <text x="140" y="670" class="s">• Working set: keep the table in L1 (128 KB here). Nasdaq's 64 KB key table + input stream costs ~2 cycles over S&amp;P 500 at the same instruction count.</text>
+
+  <!-- when NOT -->
+  <rect x="120" y="700" width="940" height="100" rx="8" class="ot"/>
+  <text x="590" y="722" text-anchor="middle" class="t" font-weight="bold">Do not reach for it when…</text>
+  <text x="140" y="744" class="s">• keys arrive at run time (config files, user input) — there is nothing to solve at compile time;</text>
+  <text x="140" y="762" class="s">• the set changes between builds faster than you can rebuild — compile time is 0.1 s (10 keys) … 5 s (5 581 keys) per translation unit that instantiates it;</text>
+  <text x="140" y="780" class="s">• you need more than 65 535 keys, keys longer than 4 080 bytes, embedded NUL bytes at the end of keys, or a table that must be identical across big/little-endian targets.</text>
+</svg>

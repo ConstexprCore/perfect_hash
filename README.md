@@ -76,6 +76,58 @@ std::optional<Method> parse_method(std::string_view s) {
 }
 ```
 
+### Large key sets (more than 255 keys)
+
+The same two factories keep working past 255 entries: they switch to the *wide* container
+(`wide_perfect_hash_set` / `wide_perfect_hash_map`, header `wide_perfect_hash.h`), which
+replaces gperf's chosen byte positions with a whole-key multiplicative hash plus a small
+per-bucket pilot table. The fast hash uses one multiply per 64-bit key lane. Keys up to
+7 bytes need just one lane; values that fit in its spare bytes are stored inside the
+key word itself. Larger keys need more lanes, and difficult sets can select a stronger
+hash at compile time. For generated key lists, pass a static-storage array by reference:
+
+```cpp
+#include <ConstexprCore/wide_perfect_hash.h>
+
+inline constexpr std::array<std::string_view, 5581> nasdaq_symbols = { "AAAP", "AACG", /* ... */ };
+
+// values = declaration index, in the smallest integer type that fits
+constexpr auto tickers = ConstexprCore::make_wide_perfect_index_map<nasdaq_symbols>();
+
+// or with your own values
+inline constexpr std::array<int, 5581> ids = { /* ... */ };
+constexpr auto tickers2 = ConstexprCore::make_wide_perfect_map<nasdaq_symbols, ids>();
+
+std::optional<std::uint16_t> id = tickers.lookup("AAPL");   // ~1.7 ns on an M3 Max
+```
+
+Measured (Apple M3 Max, shuffled hits): S&P 500 (503 symbols) **1.2 ns**, all Nasdaq-listed
+symbols (5 581) **1.7 ns** — versus 2.4 / 3.0 ns for packing the symbol into a `uint64_t`
+and probing `absl::flat_hash_map`, 4.8 / 5.9 ns for a 27-ary array trie, and 7.6 / 6.6 ns
+for `absl::flat_hash_map<std::string_view, int>`. Building the 5 581-key map takes ~5 s of
+compile time; raise `-fconstexpr-steps` (clang) / `-fconstexpr-ops-limit` (GCC) as the
+benchmarks' `CMakeLists.txt` does.
+
+### Long keys (more than 32 bytes)
+
+Keys up to 4 080 bytes are supported by the wide container; the factories also select
+it when keys exceed the classic container's 254-byte limit. On SIMD targets, longer
+keys use a fixed number of 16-byte chunk compares. The NEON 17–32-byte comparison
+uses branch-free, shift-realigned loads; SSE2 and LSX use a page guard. Scalar targets
+use byte loads. 40
+fully-qualified Java class names (24–54 bytes): **2.05 ns** per lookup, where the
+previous scalar byte loop took 23 ns. Sets of 8+ keys with a maximum length of 2–7 bytes
+also route to the wide container automatically — the S&P 100 drops from 1.77 to 1.32 ns.
+Single-byte sets with at most 255 keys use a direct table.
+
+Generation verifies every stored key at compile time and reports an error if its
+bounded seed/placement search fails. In wide sets whose maximum key length is at least
+16 bytes, keys that differ only by trailing NUL bytes are currently rejected because
+their zero-padded hash lanes are identical.
+
+The [PR review measurements](docs/pr30_review.md) record the retained compile-time
+improvement, correctness fixes, rejected optimization, and local validation.
+
 
 ## Building
 

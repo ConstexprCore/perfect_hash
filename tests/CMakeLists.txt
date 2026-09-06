@@ -14,6 +14,10 @@ add_executable(phf_tests
     test_url_protocols.cpp
     test_http_methods.cpp
     test_edge_cases.cpp
+    test_wide.cpp
+    test_benchmark_inputs.cpp
+    test_simd_review.cpp
+    test_classic_review.cpp
 )
 
 target_link_libraries(phf_tests PRIVATE
@@ -30,6 +34,34 @@ target_compile_options(phf_tests PRIVATE
 
 include(${doctest_SOURCE_DIR}/scripts/cmake/doctest.cmake)
 doctest_discover_tests(phf_tests)
+
+# Changing the position budget changes the container layout. Keep each
+# configuration in its own executable to avoid mixing incompatible types.
+foreach(position_budget IN ITEMS 1 2)
+    set(position_target phf_positions_${position_budget}_tests)
+    add_executable(${position_target} main.cpp test_classic_review.cpp)
+    target_link_libraries(${position_target} PRIVATE
+        ConstexprCore::perfect_hash doctest::doctest)
+    target_compile_definitions(${position_target} PRIVATE
+        CONSTEXPRCORE_MAX_POSITIONS=${position_budget})
+    target_compile_options(${position_target} PRIVATE
+        $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>
+        $<$<CXX_COMPILER_ID:GNU>:-fconstexpr-ops-limit=1000000000>
+        $<$<CXX_COMPILER_ID:Clang,AppleClang>:-fconstexpr-steps=1000000000>
+        $<$<CXX_COMPILER_ID:MSVC>:/W4 /constexpr:steps1000000000>)
+    doctest_discover_tests(${position_target} TEST_PREFIX "positions_${position_budget}:")
+endforeach()
+
+# Separate translation units let LTO expose short literal objects after the
+# lookup helpers have already been compiled and inlined once.
+include(CheckIPOSupported)
+check_ipo_supported(RESULT PH_TEST_IPO_SUPPORTED LANGUAGES CXX)
+if(PH_TEST_IPO_SUPPORTED)
+    add_executable(phf_simd_lto_smoke test_simd_lto_main.cpp test_simd_lto_lookup.cpp)
+    target_link_libraries(phf_simd_lto_smoke PRIVATE ConstexprCore::perfect_hash)
+    set_property(TARGET phf_simd_lto_smoke PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+    add_test(NAME phf_simd_lto_smoke COMMAND phf_simd_lto_smoke)
+endif()
 
 if(PH_SINGLEHEADER_AVAILABLE)
     add_executable(phf_singleheader_smoke

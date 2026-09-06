@@ -55,7 +55,10 @@ if(Python3_Interpreter_FOUND)
             --neon-compare "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/detail/neon_compare.h"
             --sse2-compare "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/detail/sse2_compare.h"
             --lsx-compare "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/detail/lsx_compare.h"
+            --simd16 "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/detail/simd16.h"
+            --wide-generator "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/detail/wide_generator.h"
             --perfect-hash "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/perfect_hash.h"
+            --wide-perfect-hash "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/wide_perfect_hash.h"
         DEPENDS
             "${PH_SINGLEHEADER_GENERATOR}"
             "${PH_FIXED_STRING_HEADER}"
@@ -63,7 +66,10 @@ if(Python3_Interpreter_FOUND)
             "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/detail/neon_compare.h"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/detail/sse2_compare.h"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/detail/lsx_compare.h"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/detail/simd16.h"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/detail/wide_generator.h"
             "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/perfect_hash.h"
+            "${CMAKE_CURRENT_SOURCE_DIR}/include/ConstexprCore/wide_perfect_hash.h"
         VERBATIM
         COMMENT "Generating single-header perfect_hash.h"
     )
