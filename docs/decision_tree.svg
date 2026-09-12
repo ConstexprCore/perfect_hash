@@ -42,20 +42,20 @@
   <text x="590" y="249" text-anchor="middle" class="t">How many keys?</text>
 
   <!-- left branch: <= 255 -->
-  <path d="M465,244 L330,244 L330,300" class="e"/><text x="330" y="238" class="l">classic shapes</text>
+  <path d="M465,244 L330,244 L330,300" class="e"/><text x="318" y="238" class="l">2 … 255, keys ≤ 254 B</text>
   <rect x="110" y="300" width="440" height="92" rx="8" class="us"/>
-  <text x="330" y="320" text-anchor="middle" class="t" font-weight="bold">classic mode: N ≤ 255 with keys ≥ 8 B, or tiny sets (N &lt; 8)</text>
+  <text x="330" y="320" text-anchor="middle" class="t" font-weight="bold">classic mode: N ≤ 255 and keys ≤ 254 B (the default)</text>
   <text x="330" y="338" text-anchor="middle" class="s">hash = len + asso[pos₁][k[pos₁]] (+ …), 1–2 chosen bytes, 4 instructions</text>
   <text x="330" y="354" text-anchor="middle" class="s">tiers picked automatically: gperf → hash-and-displace → seeded whole-key</text>
   <text x="330" y="370" text-anchor="middle" class="s">1.27–2.05 ns; 0.00 branch misses on every set incl. Counters</text>
   <text x="330" y="386" text-anchor="middle" class="s">N ≥ ~50: set -fconstexpr-steps (clang default ≈ 1 M steps)</text>
 
   <!-- right branch: > 255 -->
-  <path d="M715,244 L850,244 L850,300" class="e"/><text x="725" y="238" class="l">wide shapes</text>
+  <path d="M715,244 L850,244 L850,300" class="e"/><text x="722" y="238" class="l">256 … 65 535, or keys ≥ 255 B</text>
   <rect x="630" y="300" width="440" height="92" rx="8" class="us"/>
-  <text x="850" y="320" text-anchor="middle" class="t" font-weight="bold">wide mode: N &gt; 255, or short keys (≤ 7 B) with N ≥ 8</text>
+  <text x="850" y="320" text-anchor="middle" class="t" font-weight="bold">wide mode: N &gt; 255, or keys ≥ 255 B (opt-in below that)</text>
   <text x="850" y="338" text-anchor="middle" class="s">whole-key multiply → bucket → u16 pilot → slot; verified at compile time</text>
-  <text x="850" y="354" text-anchor="middle" class="s">S&amp;P 100 1.32 · S&amp;P 500 1.27 · all 5 581 Nasdaq symbols 1.73 (36–40 instr)</text>
+  <text x="850" y="354" text-anchor="middle" class="s">S&amp;P 500 1.27 · all 5 581 Nasdaq symbols 1.73 (36–40 instr) · opt-in S&amp;P 100 1.32</text>
   <text x="850" y="370" text-anchor="middle" class="s">generated lists: make_wide_perfect_index_map&lt;array&gt;() — 5 s compile @ 5 581</text>
   <text x="850" y="386" text-anchor="middle" class="s">beyond 65 535 keys or 4 080-byte keys: pthash / absl at run time</text>
 

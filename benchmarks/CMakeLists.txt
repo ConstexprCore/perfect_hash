@@ -104,6 +104,22 @@ elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     target_compile_options(bench_tickers PRIVATE -fconstexpr-ops-limit=4294967295 -fconstexpr-loop-limit=2147483647)
 endif()
 
+# Classic-vs-wide crossover sweep on short keys (EXPERIMENTAL_DIARY.md, Day 3).
+# N = 8..128 by default; PH_CROSSOVER_BIG adds N = 192 / 255 (several minutes of
+# consteval for the classic H&D / seeded tiers).
+option(PH_CROSSOVER_BIG "bench_crossover: also build the N = 192 / 255 sets" OFF)
+add_executable(bench_crossover bench_crossover.cpp)
+target_include_directories(bench_crossover PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/data)
+target_link_libraries(bench_crossover PRIVATE ConstexprCore::perfect_hash counters::counters)
+if(PH_CROSSOVER_BIG)
+    target_compile_definitions(bench_crossover PRIVATE BENCH_CROSSOVER_BIG=1)
+endif()
+if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    target_compile_options(bench_crossover PRIVATE -fconstexpr-steps=4294967295)
+elseif(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
+    target_compile_options(bench_crossover PRIVATE -fconstexpr-ops-limit=4294967295 -fconstexpr-loop-limit=2147483647)
+endif()
+
 add_executable(simd_experiments ../perf_viz/simd_experiments.cpp)
 target_link_libraries(simd_experiments PRIVATE
     ConstexprCore::perfect_hash counters::counters)

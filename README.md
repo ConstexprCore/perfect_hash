@@ -116,9 +116,16 @@ keys use a fixed number of 16-byte chunk compares. The NEON 17–32-byte compari
 uses branch-free, shift-realigned loads; SSE2 and LSX use a page guard. Scalar targets
 use byte loads. 40
 fully-qualified Java class names (24–54 bytes): **2.05 ns** per lookup, where the
-previous scalar byte loop took 23 ns. Sets of 8+ keys with a maximum length of 2–7 bytes
-also route to the wide container automatically — the S&P 100 drops from 1.77 to 1.32 ns.
-Single-byte sets with at most 255 keys use a direct table.
+previous scalar byte loop took 23 ns. Single-byte sets with at most 255 keys use a
+direct table.
+
+The factories pick the wide container only when the classic one cannot be used (more
+than 255 keys, or keys of 255+ bytes). For short-key sets that fit the classic container
+you can still call `make_wide_perfect_set` / `make_wide_perfect_map` explicitly, but
+measure first: the wide lookup trades latency for throughput, so it wins on predictable
+all-hit streams for larger sets (S&P 100: 1.77 → 1.32 ns on an M3 Max) and loses on
+small sets and on mixed hit/miss streams (C++ Keywords, N = 15: +17 % hits / +30 % misses
+on a Xeon with GCC 14).
 
 Generation verifies every stored key at compile time and reports an error if its
 bounded seed/placement search fails. In wide sets whose maximum key length is at least
@@ -352,7 +359,7 @@ The benchmark suite compares multiple lookup strategies across key sets of varyi
 | HTTP Headers 50 | `headers50` | 50 | 19 | Realistic large header set |
 | JavaScript Reserved Words | `jsreserved` | 45 | 10 | Medium keys, dense set |
 
-Each key set is tested with three query mixes (positive-only, negative-only, 50/50 mixed) against:
+Each key set is tested with three query mixes (positive-only, negative-only, and mixed — a uniform sample over the concatenated hit and miss pools, so the hit ratio follows the pool sizes) against:
 
 - **`make_perfect_map`** — this library's compile-time PHF
 - **`gperf`** — GNU `gperf`-generated lookup

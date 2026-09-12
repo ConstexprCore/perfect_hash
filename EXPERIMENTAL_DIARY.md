@@ -473,6 +473,9 @@ of the key. Measured in the real harness (hits, ns):
 | Java FQCNs (40, ≤54 B) | **2.05** | 6.29 | classic (positions skip 6/8 lanes) |
 
 `prefer_wide_container(N, MaxKeyLen)`: wide iff `N > 255` or `(N ≥ 8 && MaxKeyLen ≤ 7)`.
+**Reverted on Day 3 (2026-09-12, PR #30 review):** this was a hits-only decision; misses,
+mixed and an x86 host said otherwise. The rule is now wide iff the classic container
+cannot be used. See Day 3 below.
 An early cut of the face-off (with a spill-heavy harness) suggested wide up to 16 bytes;
 the real harness overruled it — recorded here because the *method* matters: only the
 final integrated benchmark decides.
@@ -544,6 +547,10 @@ gets the guarded form back anywhere).
 | S&P 500 (503) | 1.27 | 1.27 | — | 0.01 |
 | Nasdaq (5 581) | 1.70 | 1.73 | — | 0.00 |
 
+*(Day 3 note: the C++ Keywords and S&P 100 rows show the wide container that the Day-2
+dispatch chose; that dispatch was reverted on 2026-09-12 and both sets are back at their
+classic numbers — see Day 3.)*
+
 **Every set in the suite now retires 0.00 branch misses per lookup** (Counters included,
 for the first time in the library's history), and every set ≥ 8 keys sits between 1.27
 and 2.05 ns. First principles say the floor for the 40-instruction sets is
@@ -551,3 +558,117 @@ and 2.05 ns. First principles say the floor for the 40-instruction sets is
 within ~8 % of retire-width-bound, and the ≤16 B classic sets run at IPC 8.7, i.e. **at**
 the machine's sustained retire ceiling; further gains there require removing instructions
 that no longer exist to remove, or raising the clock.
+
+## Day 3 — 2026-09-12: PR #30 review, the short-key dispatch reverted
+
+Daniel's review of PR #30 (comment of 2026-09-10) measured two machines — an Apple M4 Max
+(AppleClang 17) and a 2 × Xeon Gold 6548N box (GCC 14.3.1) — against `main`, using the
+*original* mixed sampling (see "the mixed generator" below). Two regressions, one cause:
+the Day-2 shape dispatch (`MaxKeyLen ≤ 7, N ≥ 8 → wide`).
+
+| set | workload | M4 Max main → PR | Xeon main → PR |
+|---|---|---|---|
+| C++ Keywords (15, ≤6 B) | hits | 1.003 → 0.988 (−1.5 %) | 1.561 → 1.818 (**+16.5 %**) |
+| | misses | 0.757 → 0.961 (**+26.9 %**) | 1.352 → 1.765 (**+30.5 %**) |
+| | mixed | 4.731 → 7.208 (**+52.4 %**) | 7.093 → 8.974 (**+26.5 %**) |
+| S&P 100 (100, ≤5 B) | hits | 1.691 → 0.993 (−41.3 %) | 2.481 → 1.816 (−26.8 %) |
+| | misses | 1.120 → 0.960 (−14.3 %) | 2.294 → 1.766 (−23.0 %) |
+| | mixed | 5.391 → 7.211 (**+33.8 %**) | 8.192 → 8.987 (**+9.7 %**) |
+
+Xeon counters for the keywords: hits 34 instructions on both, but 5.46 → 6.38 cycles
+(IPC 6.2 → 5.3); misses 29 → 32 instructions, 4.73 → 6.19 cycles. Not more work — a
+longer chain. The wide lookup is multiply → pilot load → key/value load → compare, and
+gperf-form is two *independent* table loads plus an add. Wide has the higher throughput
+and the higher latency; the S&P 100 mixed row is the tell: behind a mispredicted caller
+branch the OoO window cannot overlap the next lookup, so latency is what you pay, and the
+set that gains the most on predictable streams loses on the alternating one.
+
+### What was wrong with the Day-2 method
+
+The Win 3 face-off table is labelled "hits, ns" — and that is all it was. Misses and
+mixed were never part of the decision, and neither was a second ISA. The rule for this
+diary is now: **a default-dispatch change needs all three workloads on both ISAs**, not
+"the final integrated benchmark" alone.
+
+### The fix
+
+`prefer_wide_container(N, MaxKeyLen)` is now `N > 255 || MaxKeyLen ≥ 255` — wide only
+where the classic, byte-indexed container cannot be used at all. Every set that `main`
+could build gets exactly the container `main` gave it. `make_wide_perfect_set` /
+`make_wide_perfect_map` remain the explicit opt-in for people who have measured their
+own stream on their own CPU. `test_wide.cpp`'s 8-key automatic-dispatch case became an
+explicit wide map plus a check that the ordinary factory keeps that set classic.
+
+**The mixed generator.** The PR had also replaced the harness's "sample uniformly from
+hits ++ misses" with an exact 50/50 interleave-then-shuffle. Daniel's objection stands:
+that stream makes every method pay ~0.5 branch misses per lookup on the *caller's*
+hit/miss branch, which drowns the differences being measured, and it breaks
+comparability with every historical number. `build_mixed_input` is back to the original
+sampling (bit-identical streams to `main`; S&P 100 ≈ 83 % hits).
+
+### Verification (M3 Max, AppleClang 15, arm64; wall-clock only — no sudo counters this run)
+
+`main` (076a1b8) vs this branch after the fix, `bench_protocol --filter make_perfect_map`,
+fastest of 300 × 200 K:
+
+| set | workload | main | fixed | Δ |
+|---|---|---|---|---|
+| C++ Keywords (15, 6) | hits | 1.426 | 1.331 | −6.7 % |
+| | misses | 0.998 | 1.042 | +4.4 % |
+| | mixed | 5.781 | 5.821 | +0.7 % |
+| S&P 100 (100, 5) | hits | 1.900 | 1.801 | −5.2 % |
+| | misses | 1.417 | 1.454 | +2.6 % |
+| | mixed | 3.578 | 3.636 | +1.6 % |
+
+Both sets report `gperf` on both binaries; repeated runs of the *same* binary move the
+keyword hits between 1.33 and 1.43, so these deltas are run-to-run noise. The rest of
+the suite is likewise classic → classic. The deltas outside a single binary's run-to-run
+band are the PR's own compare-path changes (JS Reserved misses 2.52 → 1.30, Counters hits
+3.34 → 1.85 / misses 6.26 → 1.57, Headers50 hits up, from the Day-2 compare work); a few
+other cells move ±5–9 % in both directions on paths this PR does not touch (HTTP Headers
+misses −9 %, Headers 50 hits −5 %), and two small shifts are *consistent* across paired
+runs: keyword misses +0.02–0.05 ns and Letters a-z +0.013 ns (0.557 → 0.570 hits, the
+1-byte direct table). Same container, same tables, untouched code on both paths, so I
+read both as code layout — but the keyword-misses row is the one to re-check on x86.
+
+### The crossover sweep Daniel asked for (Apple silicon only — x86 still open)
+
+Same key family as the S&P sets (first N tickers of the S&P 500 list, MaxKeyLen 4–5),
+misses = N/5 real Nasdaq symbols, mixed = original sampling (~83 % hits), classic and
+wide instantiated side by side in one TU, `int` values (unfused wide, as in
+`bench_protocol`). Source: `benchmarks/bench_crossover.cpp` (target `bench_crossover`;
+`-DPH_CROSSOVER_BIG=ON` adds N = 192 / 255, several minutes of consteval for the classic
+H&D / seeded tiers). ns/lookup, fastest of 300 × 200 K:
+
+| N | classic tier | hits classic / wide | misses classic / wide | mixed classic / wide |
+|---|---|---|---|---|
+| 8 | gperf, M=8 | 2.01 / **1.69** | **0.95** / 1.48 | **3.66** / 4.78 |
+| 16 | gperf, M=16 | 1.89 / **1.70** | **1.10** / 1.49 | **3.34** / 4.13 |
+| 32 | gperf, M=32 | 1.75 / **1.69** | **1.18** / 1.49 | **3.21** / 4.14 |
+| 64 | gperf, M=128 | **1.65** / 1.70 | **1.14** / 1.49 | **3.24** / 4.14 |
+| 100 | gperf, M=256 | 1.97 / **1.69** | 1.49 / 1.48 | **3.85** / 4.26 |
+| 128 | gperf, M=256 | 1.98 / **1.69** | 1.46 / 1.49 | **3.77** / 4.24 |
+| 192 | H&D, M=256 | 2.64 / **1.94** | 1.84 / **1.42** | **4.22** / 4.38 |
+| 255 | seeded-fullhash, M=256 | 5.75 / **1.88** | 3.87 / **1.41** | 7.99 / **4.35** |
+
+Three things fall out:
+
+1. **Wide is essentially flat in N** (1.69 / 1.48 / 4.1–4.3 ns through 128, mixed 4.78
+   at N = 8; 1.9 / 1.4 / 4.4 at 192–255): it hashes the whole key, so almost nothing
+   depends on the set. Classic's cost is set-dependent through the tier and the table.
+2. **There is no N at which wide is a pure win while classic is in the gperf tier.**
+   Wide takes hits at every gperf-tier N except 64 (−3 to −16 %), but classic takes
+   mixed at every N through 192 and misses through 64, with misses a dead heat at
+   100–128. Wide never takes mixed and never clearly takes misses. An N-threshold rule
+   therefore cannot be right on this ISA, whatever it says on x86 — which is the reason
+   the fix removes the heuristic instead of moving it.
+3. **The real signal is the classic tier, not N.** Once the classic generator falls
+   out of gperf-form the picture changes: H&D at 192 loses hits and misses to wide
+   (2.64 / 1.84 vs 1.94 / 1.42) but still holds mixed (4.22 vs 4.38); the seeded
+   whole-key hash at 255 loses every workload, by 3× on hits (5.75 → 1.88) and 1.8×
+   on mixed (7.99 → 4.35). The seeded tier *is* a whole-key hash, just a slower one
+   with a longer chain. A future auto-dispatch worth measuring on
+   x86: "if the classic generator lands in the seeded-fullhash tier, build wide
+   instead". With a non-throwing `compute_phf` it would also rescue the ≤255-key
+   lottery sets that today fail to compile. Not done in this PR — it is exactly the
+   kind of rule that must be measured on both ISAs and all three workloads first.

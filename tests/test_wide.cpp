@@ -309,21 +309,31 @@ inline constexpr std::array<std::uint8_t, 2> fused_medium_values{0, 255};
 inline constexpr std::array<bool, 2> wide_bool_values{false, true};
 inline constexpr auto fused_medium = make_wide_perfect_map<fused_medium_keys, fused_medium_values>();
 inline constexpr auto wide_bool = make_wide_perfect_map<fused_medium_keys, wide_bool_values>();
-inline constexpr auto automatic_wide_bool = make_perfect_map<
+inline constexpr std::array<std::string_view, 8> short8_keys{"aa", "ab", "ac", "ad", "ae", "af", "ag", "ah"};
+inline constexpr std::array<bool, 8> short8_bools{false, true, false, true, false, true, false, true};
+inline constexpr auto explicit_wide_bool = make_wide_perfect_map<short8_keys, short8_bools>();
+// The ordinary factory keeps short-key sets that fit the classic container classic.
+inline constexpr auto automatic_short_bool = make_perfect_map<
     kv<"aa", false>, kv<"ab", true>, kv<"ac", false>, kv<"ad", true>,
     kv<"ae", false>, kv<"af", true>, kv<"ag", false>, kv<"ah", true>>();
 
 TEST_CASE("wide map: two-lane fusion preserves every byte of the first lane") {
     static_assert(decltype(fused_medium)::FUSED);
     static_assert(!decltype(wide_bool)::FUSED);
-    static_assert(!decltype(automatic_wide_bool)::FUSED);
-    static_assert(*automatic_wide_bool.lookup("ab"));
-    static_assert(!*automatic_wide_bool.lookup("aa"));
+    static_assert(!decltype(explicit_wide_bool)::FUSED);
+    static_assert(*explicit_wide_bool.lookup("ab"));
+    static_assert(!*explicit_wide_bool.lookup("aa"));
+    static_assert(!automatic_short_bool.algorithm_name().starts_with("wide"));
+    static_assert(*automatic_short_bool.lookup("ab"));
+    static_assert(!*automatic_short_bool.lookup("aa"));
     static_assert(!fused_medium.contains("aXcdefghi"));
     static_assert(*wide_bool.lookup("ABCDEFGHI"));
-    CHECK(automatic_wide_bool.lookup_or("ab", false));
-    CHECK_FALSE(automatic_wide_bool.lookup_or("aa", true));
-    CHECK_FALSE(automatic_wide_bool.lookup("missing").has_value());
+    CHECK(explicit_wide_bool.lookup_or("ab", false));
+    CHECK_FALSE(explicit_wide_bool.lookup_or("aa", true));
+    CHECK_FALSE(explicit_wide_bool.lookup("missing").has_value());
+    CHECK(automatic_short_bool.lookup("ab").value_or(false));
+    CHECK_FALSE(automatic_short_bool.lookup("aa").value_or(true));
+    CHECK_FALSE(automatic_short_bool.lookup("missing").has_value());
     for (std::size_t i = 0; i < fused_medium_keys.size(); ++i) {
         std::string key(fused_medium_keys[i]);
         CHECK(fused_medium.lookup_or(key, 42) == fused_medium_values[i]);

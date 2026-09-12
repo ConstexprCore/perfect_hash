@@ -231,7 +231,7 @@ void run_keyset(const std::string& name, const Wide& wide, const FrozenT* frozen
   };
   if (filter.workload("hits"))   { std::println("  --- all hits ---");     run("hits  ", hits); }
   if (filter.workload("misses")) { std::println("  --- all misses ---");   run("misses", misses); }
-  if (filter.workload("mixed"))  { std::println("  --- mixed (50/50) ---"); run("mixed ", mixed); }
+  if (filter.workload("mixed"))  { std::println("  --- mixed (hits + misses pool) ---"); run("mixed ", mixed); }
 }
 
 template <typename Wide>

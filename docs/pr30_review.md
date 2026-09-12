@@ -22,7 +22,12 @@ about instruction counts or branch misses.
   mapped-memory loads so later optimization cannot change membership results.
 - Made mixed benchmarks explicitly 50% hits, independent of key-pool sizes.
   Previously, for example, the S&P 100 benchmark sampled 100 hit keys and 20
-  miss keys from a combined pool, producing about 83% hits.
+  miss keys from a combined pool, producing about 83% hits. **Reverted after
+  maintainer review (2026-09-12):** a forced 50/50 shuffle makes every method
+  pay ~0.5 branch misses per lookup on the caller's own hit/miss branch, which
+  drowns the differences between lookups, and it breaks comparability with
+  every historical run. The mixed stream is again a uniform sample of the
+  concatenated pools.
 
 ## Compile-time improvement
 
@@ -85,11 +90,14 @@ The experiment was reverted because the affected cases lost 2.5–6.6%.
 
 ## Full runtime comparison and validation
 
-Both revisions use the corrected workload generator, identical dependencies,
+Both revisions were measured with the exact-50/50 mixed generator that has since
+been reverted (see above), with identical dependencies,
 compiler flags, and benchmark translation units. Runs alternate order to reduce
 drift. Each reported process result is the fastest of 300 shuffled batches of
 200,000 lookups; the comparison uses the median of five process results.
-Hits, misses, and exact 50/50 mixtures are measured for all twelve key sets.
+Hits, misses, and (50/50) mixtures were measured for all twelve key sets; the mixed
+rows below and in the result file are therefore not comparable with `main`'s or the
+Day-3 pool-sampled mixed numbers (the hit and miss tables are unaffected).
 
 The test suite includes fixed and runtime keys, lane-by-lane fused comparisons,
 empty views, padded tails, configurable position budgets, large key lengths, and
@@ -112,6 +120,10 @@ available locally; MSVC was not tested locally.
 | S&P 500 Tickers | 1.329 | 1.345 |
 | URL Protocols | 1.272 | 1.295 |
 
+S&P 100 and C++ Keywords were built with the wide container at review baseline
+7d49ef2 (shape dispatch); after the 2026-09-12 revert both are classic — 1.80 / 1.33 ns
+hits on the same box (`EXPERIMENTAL_DIARY.md`, Day 3).
+
 Across all 36 dataset/workload combinations, median changes ranged from −5.8%
 to +4.4%. Most changes were within 2%; the HTTP Headers mixed case was 6.766 →
 7.062 ns (+4.4%). These lookup results do not establish a general runtime speedup.
@@ -120,7 +132,8 @@ including misses and mixtures, are in [the result file](../perf_viz/pr30_review_
 
 The compiler-known-object fallback was added after this full comparison. A second
 five-pair comparison against the repaired build covered every affected native
-dataset (Headers, Headers 50, MIME, Counters, FQCNs) on hits, misses, and mixtures.
+dataset (Headers, Headers 50, MIME, Counters, FQCNs) on hits, misses, and (50/50)
+mixtures.
 Its median changes ranged from −1.8% to +1.2%. The subsequent explicit-load change
 is compiled only on SSE2 targets.
 

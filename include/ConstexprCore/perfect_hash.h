@@ -758,21 +758,26 @@ template <typename ValueT, typename... KVs>
 inline constexpr std::array<ValueT, sizeof...(KVs)> kv_values_v{static_cast<ValueT>(KVs::value)...};
 } // namespace detail
 
-// Container choice, measured in the full benchmark harness (M3 Max, hits):
-//   MaxKeyLen == 1          -> classic (direct 256-entry byte table, ~0.5 ns)
-//   MaxKeyLen 2..7, N >= 8  -> wide    (one 64-bit lane holds key+length, so
-//                              the compare IS the hash input: S&P 100
-//                              1.77 -> 1.32 ns, C++ keywords 1.42 -> 1.32)
-//   tiny N (< 8), len < 255 -> classic (fully-predicted branchy hash + a
-//                              one-cache-line table still win: URL protocols
-//                              1.27 classic vs 1.33 wide at N = 6)
-//   MaxKeyLen 8..254        -> classic (two-lane extraction + two multiplies
-//                              lose to 1-2 chosen positions + one vector
-//                              compare: HTTP headers 1.33 classic vs 1.75 wide)
-//   N > 255                 -> wide    (byte-indexed design ends at 255)
-//   MaxKeyLen >= 255         -> wide    (classic reserves byte length 255)
+// Container choice. The wide container is selected only where the classic,
+// byte-indexed design cannot be used at all:
+//   N > 255           -> wide    (slot and position tables are byte-indexed)
+//   MaxKeyLen >= 255  -> wide    (the classic hash reserves byte length 255)
+//   everything else   -> classic
+//
+// An earlier revision also routed short-key sets (MaxKeyLen 2..7, N >= 8) to
+// wide because it won the all-hits workload on Apple silicon (S&P 100
+// 1.77 -> 1.32 ns). The PR #30 review measured the other workloads and an x86
+// host and found it a net loss for small sets: C++ Keywords (N = 15) +17 %
+// hits / +30 % misses on a Xeon (GCC 14), +27 % misses on an M4 Max, and even
+// the S&P 100 (N = 100) +10-34 % on the mixed stream. The wide lookup is a
+// longer dependency chain (multiply -> pilot load -> key load -> compare) than
+// the classic 1-2 position table loads: more throughput, more latency, and
+// behind an unpredictable caller branch the latency is what shows. Since the
+// answer depends on the workload and the ISA, the factories no longer guess;
+// call make_wide_perfect_set / make_wide_perfect_map explicitly when a
+// measurement on the target CPU says so. See EXPERIMENTAL_DIARY.md.
 constexpr bool prefer_wide_container(std::size_t n, std::size_t max_len) noexcept {
-    return n > 255 || max_len >= 255 || (n >= 8 && max_len >= 2 && max_len <= 7);
+    return n > 255 || max_len >= 255;
 }
 
 template <fixed_string... Keys>

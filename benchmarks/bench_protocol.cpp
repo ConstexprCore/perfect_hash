@@ -5,7 +5,7 @@
  * Each set is benchmarked in three workload modes:
  *   - All hits:   every lookup finds a match (primary use case)
  *   - All misses: every lookup fails (negative filter use case)
- *   - Mixed:      50/50 hits and misses
+ *   - Mixed:      uniform over the hit and miss pools (hit ratio = |hits| / (|hits| + |misses|))
  *
  * Reference:
  * Daniel Lemire, "Quickly checking that a string belongs to a small set,"
@@ -357,7 +357,7 @@ void run_keyset(const std::string &name,
     bench_pthash("misses", misses, num_strings, pthash_phf, filter);
   }
   if (filter.run_workload("mixed")) {
-    std::println("  --- mixed (50/50) ---");
+    std::println("  --- mixed (hits + misses pool) ---");
     bench_workload("mixed ", mixed, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, gperf_fn, filter, describe);
     bench_pthash("mixed ", mixed, num_strings, pthash_phf, filter);
   }
