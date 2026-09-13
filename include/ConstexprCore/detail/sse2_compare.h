@@ -53,12 +53,42 @@ inline constexpr std::uint8_t and_masks[17][16] = {
     {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF},
 };
 
+// Read an address range that the caller has established is mapped. The
+// explicit machine load keeps the page-safe overread out of C++ vector-load
+// folding, including when LTO later discovers a short input object. The
+// memory operand describes exactly the bytes read, without a memory clobber.
+constexprcore_really_inline __m128i sse2_load_mapped_16(const char* p) noexcept {
+#if defined(__GNUC__) || defined(__clang__)
+    using bytes16 = char[16];
+    __m128i raw;
+#if defined(__AVX__)
+    __asm__("vmovdqu {%1, %0|%0, %1}" : "=x"(raw)
+            : "m"(*reinterpret_cast<const bytes16*>(p)));
+#else
+    __asm__("movdqu {%1, %0|%0, %1}" : "=x"(raw)
+            : "m"(*reinterpret_cast<const bytes16*>(p)));
+#endif
+    return raw;
+#else
+    return _mm_loadu_si128(reinterpret_cast<const __m128i*>(p));
+#endif
+}
+
 // Page-safe 16-byte load helper for x86-64.
 // Falls back to byte-by-byte copy for addresses near page boundaries.
 CONSTEXPRCORE_NO_SANITIZE_ADDRESS constexprcore_really_inline __m128i page_safe_load_16(const char* p, std::size_t len) noexcept {
     uintptr_t addr = reinterpret_cast<uintptr_t>(p);
-    if ((addr & 4095) <= 4096 - 16) [[likely]] {
-        return _mm_loadu_si128(reinterpret_cast<const __m128i*>(p));
+    // A mapped page alone does not make a short C++ object a 16-byte
+    // object. In particular, Clang can fold a literal overread to poison
+    // before the AND mask removes its unused bytes. Copy known short
+    // objects; this builtin is a constant and adds no runtime size check.
+#if defined(__GNUC__) || defined(__clang__)
+    const bool full_object = __builtin_object_size(p, 0) >= 16;
+#else
+    const bool full_object = true;
+#endif
+    if (full_object && (addr & 4095) <= 4096 - 16) [[likely]] {
+        return sse2_load_mapped_16(p);
     }
     alignas(16) std::uint8_t buf[16] = {};
     for (std::size_t j = 0; j < len; j++)
@@ -138,7 +168,7 @@ constexprcore_really_inline bool sse2_compare_32(const char* p, std::size_t len,
     // ensures the load itself cannot fault even when p+16 is past the
     // string buffer.
     std::size_t tail_len = len > 16 ? len - 16 : 0;
-    __m128i raw2 = page_safe_load_16(p + 16, tail_len);
+    __m128i raw2 = page_safe_load_16(len > 16 ? p + 16 : p, tail_len);
     __m128i mask2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(and_masks[tail_len]));
     __m128i input2 = _mm_and_si128(raw2, mask2);
     __m128i stored2 = _mm_loadu_si128(reinterpret_cast<const __m128i*>(stored + 16));

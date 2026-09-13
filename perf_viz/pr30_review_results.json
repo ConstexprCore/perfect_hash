@@ -1,0 +1,1486 @@
+{
+  "baseline": "7d49ef211d3038478dfbfcb4b07588d17c00bf61",
+  "platform": "Apple M3 Max, AppleClang 15, arm64, -O3",
+  "methodology": "Five alternating process runs; each result is fastest of 300 shuffled 200000-lookup batches. Same corrected 50/50 harness for both builds. No PMU counters.",
+  "factory_compile": {
+    "before": {
+      "median_s": 0.6608620840000015,
+      "samples_s": [
+        0.667076333,
+        0.5866455419999999,
+        0.66232325,
+        0.6617167500000001,
+        0.6660332909999997,
+        0.6638221660000001,
+        0.6599777910000011,
+        0.6608620840000015,
+        0.5894658329999984,
+        0.6579045830000005,
+        0.6576132080000008,
+        0.6729502500000013,
+        0.5813336660000026,
+        0.6784239999999997,
+        0.5809635419999992
+      ]
+    },
+    "after": {
+      "median_s": 0.5681110410000016,
+      "samples_s": [
+        0.5849514579999999,
+        0.5454292920000001,
+        0.607459666,
+        0.5812933339999997,
+        0.5337154170000007,
+        0.5934682090000001,
+        0.6078274169999993,
+        0.5853337080000003,
+        0.5326482499999994,
+        0.5838932919999991,
+        0.5428402499999994,
+        0.539068125,
+        0.5329282499999977,
+        0.5419947500000006,
+        0.5681110410000016
+      ]
+    },
+    "median_reduction_percent": 14.034856174317845,
+    "before_faster_pairs": 0
+  },
+  "strong_fallback": {
+    "runtime": {
+      "before": [
+        "strong_map,4.23192,1140000000,seeds=1\nstrong_hash4,0.828332,1978969957447538624\n",
+        "strong_map,4.18937,1140000000,seeds=1\nstrong_hash4,0.831894,1978969957447538624\n",
+        "strong_map,4.21025,1140000000,seeds=1\nstrong_hash4,0.829969,1978969957447538624\n",
+        "strong_map,4.20419,1140000000,seeds=1\nstrong_hash4,0.828743,1978969957447538624\n",
+        "strong_map,4.20426,1140000000,seeds=1\nstrong_hash4,0.824568,1978969957447538624\n"
+      ],
+      "after": [
+        "strong_map,5.31272,1140000000,seeds=1\nstrong_hash4,1.27655,8846410964784550048\n",
+        "strong_map,5.11016,1140000000,seeds=1\nstrong_hash4,1.26884,8846410964784550048\n",
+        "strong_map,5.13472,1140000000,seeds=1\nstrong_hash4,1.27415,8846410964784550048\n",
+        "strong_map,5.12499,1140000000,seeds=1\nstrong_hash4,1.27276,8846410964784550048\n",
+        "strong_map,5.11164,1140000000,seeds=1\nstrong_hash4,1.27326,8846410964784550048\n"
+      ]
+    },
+    "compile_seconds": {
+      "before": [
+        0.5892215410000001,
+        0.5830289579999999,
+        0.5994094159999994,
+        0.5906145409999999,
+        0.5897430830000001
+      ],
+      "after": [
+        0.5975093330000001,
+        0.5831283749999998,
+        0.5927286249999995,
+        0.5887237499999998,
+        0.6155869999999997
+      ]
+    }
+  },
+  "rejected_compact_masks": [
+    {
+      "keyset": "Counters",
+      "workload": "hits",
+      "samples_ns": {
+        "table": [
+          1.726,
+          1.881,
+          1.85,
+          1.728,
+          1.724
+        ],
+        "compact": [
+          1.771,
+          1.929,
+          1.769,
+          1.77,
+          1.906
+        ]
+      }
+    },
+    {
+      "keyset": "HTTP Headers",
+      "workload": "hits",
+      "samples_ns": {
+        "table": [
+          1.242,
+          1.241,
+          1.245,
+          1.239,
+          1.242
+        ],
+        "compact": [
+          1.242,
+          1.238,
+          1.241,
+          1.245,
+          1.354
+        ]
+      }
+    },
+    {
+      "keyset": "HTTP Headers 50",
+      "workload": "hits",
+      "samples_ns": {
+        "table": [
+          1.923,
+          1.783,
+          1.761,
+          1.809,
+          1.88
+        ],
+        "compact": [
+          1.797,
+          1.819,
+          1.965,
+          1.885,
+          1.856
+        ]
+      }
+    },
+    {
+      "keyset": "MIME Types",
+      "workload": "hits",
+      "samples_ns": {
+        "table": [
+          1.414,
+          1.418,
+          1.542,
+          1.411,
+          1.542
+        ],
+        "compact": [
+          1.542,
+          1.542,
+          1.415,
+          1.512,
+          1.463
+        ]
+      }
+    }
+  ],
+  "full_runtime": [
+    {
+      "keyset": "C++ Keywords",
+      "workload": "hits",
+      "samples_ns": {
+        "before": [
+          1.234,
+          1.308,
+          1.31,
+          1.339,
+          1.34
+        ],
+        "after": [
+          1.34,
+          1.333,
+          1.33,
+          1.34,
+          1.336
+        ]
+      }
+    },
+    {
+      "keyset": "C++ Keywords",
+      "workload": "misses",
+      "samples_ns": {
+        "before": [
+          1.216,
+          1.21,
+          1.195,
+          1.129,
+          1.129
+        ],
+        "after": [
+          1.214,
+          1.195,
+          1.214,
+          1.129,
+          1.216
+        ]
+      }
+    },
+    {
+      "keyset": "C++ Keywords",
+      "workload": "mixed",
+      "samples_ns": {
+        "before": [
+          8.53,
+          8.918,
+          8.739,
+          8.69,
+          8.894
+        ],
+        "after": [
+          8.779,
+          8.984,
+          9.014,
+          8.847,
+          8.851
+        ]
+      }
+    },
+    {
+      "keyset": "Counters",
+      "workload": "hits",
+      "samples_ns": {
+        "before": [
+          1.848,
+          1.878,
+          1.849,
+          1.881,
+          1.881
+        ],
+        "after": [
+          1.88,
+          1.85,
+          1.878,
+          1.88,
+          1.851
+        ]
+      }
+    },
+    {
+      "keyset": "Counters",
+      "workload": "misses",
+      "samples_ns": {
+        "before": [
+          1.468,
+          1.597,
+          1.6,
+          1.6,
+          1.46
+        ],
+        "after": [
+          1.601,
+          1.575,
+          1.597,
+          1.599,
+          1.483
+        ]
+      }
+    },
+    {
+      "keyset": "Counters",
+      "workload": "mixed",
+      "samples_ns": {
+        "before": [
+          8.685,
+          9.056,
+          9.035,
+          8.875,
+          8.738
+        ],
+        "after": [
+          8.726,
+          8.716,
+          9.067,
+          8.945,
+          9.053
+        ]
+      }
+    },
+    {
+      "keyset": "HTTP Headers",
+      "workload": "hits",
+      "samples_ns": {
+        "before": [
+          1.296,
+          1.354,
+          1.354,
+          1.354,
+          1.354
+        ],
+        "after": [
+          1.244,
+          1.298,
+          1.328,
+          1.354,
+          1.354
+        ]
+      }
+    },
+    {
+      "keyset": "HTTP Headers",
+      "workload": "misses",
+      "samples_ns": {
+        "before": [
+          0.992,
+          0.994,
+          1.084,
+          1.083,
+          1.083
+        ],
+        "after": [
+          1.083,
+          1.083,
+          1.083,
+          1.083,
+          1.083
+        ]
+      }
+    },
+    {
+      "keyset": "HTTP Headers",
+      "workload": "mixed",
+      "samples_ns": {
+        "before": [
+          6.592,
+          7.156,
+          6.599,
+          7.181,
+          6.766
+        ],
+        "after": [
+          7.062,
+          7.062,
+          7.079,
+          7.041,
+          7.173
+        ]
+      }
+    },
+    {
+      "keyset": "HTTP Headers 50",
+      "workload": "hits",
+      "samples_ns": {
+        "before": [
+          1.923,
+          1.917,
+          1.866,
+          1.921,
+          1.921
+        ],
+        "after": [
+          1.921,
+          1.892,
+          1.821,
+          1.921,
+          1.922
+        ]
+      }
+    },
+    {
+      "keyset": "HTTP Headers 50",
+      "workload": "misses",
+      "samples_ns": {
+        "before": [
+          1.528,
+          1.534,
+          1.63,
+          1.653,
+          1.656
+        ],
+        "after": [
+          1.539,
+          1.653,
+          1.647,
+          1.65,
+          1.649
+        ]
+      }
+    },
+    {
+      "keyset": "HTTP Headers 50",
+      "workload": "mixed",
+      "samples_ns": {
+        "before": [
+          8.373,
+          8.543,
+          8.416,
+          8.516,
+          8.552
+        ],
+        "after": [
+          7.825,
+          8.396,
+          8.539,
+          8.549,
+          7.938
+        ]
+      }
+    },
+    {
+      "keyset": "Java FQCNs",
+      "workload": "hits",
+      "samples_ns": {
+        "before": [
+          2.062,
+          2.089,
+          2.089,
+          2.088,
+          2.09
+        ],
+        "after": [
+          1.998,
+          2.05,
+          2.058,
+          2.038,
+          2.089
+        ]
+      }
+    },
+    {
+      "keyset": "Java FQCNs",
+      "workload": "misses",
+      "samples_ns": {
+        "before": [
+          1.81,
+          1.844,
+          1.844,
+          1.81,
+          1.844
+        ],
+        "after": [
+          1.815,
+          1.797,
+          1.81,
+          1.694,
+          1.768
+        ]
+      }
+    },
+    {
+      "keyset": "Java FQCNs",
+      "workload": "mixed",
+      "samples_ns": {
+        "before": [
+          8.815,
+          9.383,
+          9.26,
+          9.401,
+          9.278
+        ],
+        "after": [
+          9.274,
+          8.844,
+          9.389,
+          9.402,
+          9.387
+        ]
+      }
+    },
+    {
+      "keyset": "JavaScript Reserved Words",
+      "workload": "hits",
+      "samples_ns": {
+        "before": [
+          1.464,
+          1.595,
+          1.596,
+          1.596,
+          1.596
+        ],
+        "after": [
+          1.503,
+          1.475,
+          1.566,
+          1.474,
+          1.565
+        ]
+      }
+    },
+    {
+      "keyset": "JavaScript Reserved Words",
+      "workload": "misses",
+      "samples_ns": {
+        "before": [
+          1.211,
+          1.324,
+          1.324,
+          1.3,
+          1.237
+        ],
+        "after": [
+          1.26,
+          1.325,
+          1.234,
+          1.248,
+          1.243
+        ]
+      }
+    },
+    {
+      "keyset": "JavaScript Reserved Words",
+      "workload": "mixed",
+      "samples_ns": {
+        "before": [
+          7.595,
+          7.595,
+          7.614,
+          7.381,
+          7.591
+        ],
+        "after": [
+          7.463,
+          7.261,
+          7.609,
+          7.599,
+          7.565
+        ]
+      }
+    },
+    {
+      "keyset": "Letters a-z",
+      "workload": "hits",
+      "samples_ns": {
+        "before": [
+          0.535,
+          0.581,
+          0.582,
+          0.581,
+          0.571
+        ],
+        "after": [
+          0.532,
+          0.571,
+          0.581,
+          0.537,
+          0.581
+        ]
+      }
+    },
+    {
+      "keyset": "Letters a-z",
+      "workload": "misses",
+      "samples_ns": {
+        "before": [
+          1.715,
+          1.577,
+          1.746,
+          1.583,
+          1.716
+        ],
+        "after": [
+          1.573,
+          1.576,
+          1.712,
+          1.711,
+          1.689
+        ]
+      }
+    },
+    {
+      "keyset": "Letters a-z",
+      "workload": "mixed",
+      "samples_ns": {
+        "before": [
+          3.737,
+          4.013,
+          4.015,
+          3.995,
+          3.995
+        ],
+        "after": [
+          3.952,
+          3.743,
+          4.005,
+          4.006,
+          3.687
+        ]
+      }
+    },
+    {
+      "keyset": "MIME Types",
+      "workload": "hits",
+      "samples_ns": {
+        "before": [
+          1.41,
+          1.54,
+          1.549,
+          1.515,
+          1.422
+        ],
+        "after": [
+          1.421,
+          1.541,
+          1.541,
+          1.542,
+          1.542
+        ]
+      }
+    },
+    {
+      "keyset": "MIME Types",
+      "workload": "misses",
+      "samples_ns": {
+        "before": [
+          1.272,
+          1.271,
+          1.177,
+          1.21,
+          1.272
+        ],
+        "after": [
+          1.273,
+          1.271,
+          1.273,
+          1.272,
+          1.272
+        ]
+      }
+    },
+    {
+      "keyset": "MIME Types",
+      "workload": "mixed",
+      "samples_ns": {
+        "before": [
+          7.711,
+          7.795,
+          8.062,
+          7.811,
+          7.564
+        ],
+        "after": [
+          7.427,
+          7.555,
+          7.86,
+          7.791,
+          7.688
+        ]
+      }
+    },
+    {
+      "keyset": "Nasdaq-listed Tickers",
+      "workload": "hits",
+      "samples_ns": {
+        "before": [
+          1.727,
+          1.588,
+          1.72,
+          1.676,
+          1.597
+        ],
+        "after": [
+          1.702,
+          1.704,
+          1.706,
+          1.711,
+          1.679
+        ]
+      }
+    },
+    {
+      "keyset": "Nasdaq-listed Tickers",
+      "workload": "misses",
+      "samples_ns": {
+        "before": [
+          1.574,
+          1.571,
+          1.577,
+          1.576,
+          1.578
+        ],
+        "after": [
+          1.536,
+          1.531,
+          1.588,
+          1.588,
+          1.591
+        ]
+      }
+    },
+    {
+      "keyset": "Nasdaq-listed Tickers",
+      "workload": "mixed",
+      "samples_ns": {
+        "before": [
+          8.845,
+          9.227,
+          9.246,
+          9.216,
+          8.986
+        ],
+        "after": [
+          9.351,
+          9.349,
+          9.333,
+          9.202,
+          9.2
+        ]
+      }
+    },
+    {
+      "keyset": "S&P 100 Tickers",
+      "workload": "hits",
+      "samples_ns": {
+        "before": [
+          1.232,
+          1.341,
+          1.335,
+          1.32,
+          1.343
+        ],
+        "after": [
+          1.294,
+          1.242,
+          1.338,
+          1.323,
+          1.267
+        ]
+      }
+    },
+    {
+      "keyset": "S&P 100 Tickers",
+      "workload": "misses",
+      "samples_ns": {
+        "before": [
+          1.106,
+          1.21,
+          1.205,
+          1.19,
+          1.205
+        ],
+        "after": [
+          1.114,
+          1.204,
+          1.211,
+          1.121,
+          1.21
+        ]
+      }
+    },
+    {
+      "keyset": "S&P 100 Tickers",
+      "workload": "mixed",
+      "samples_ns": {
+        "before": [
+          8.828,
+          8.707,
+          8.95,
+          8.937,
+          9.06
+        ],
+        "after": [
+          8.795,
+          8.927,
+          8.954,
+          8.82,
+          8.881
+        ]
+      }
+    },
+    {
+      "keyset": "S&P 500 Tickers",
+      "workload": "hits",
+      "samples_ns": {
+        "before": [
+          1.32,
+          1.387,
+          1.329,
+          1.328,
+          1.329
+        ],
+        "after": [
+          1.345,
+          1.32,
+          1.338,
+          1.371,
+          1.371
+        ]
+      }
+    },
+    {
+      "keyset": "S&P 500 Tickers",
+      "workload": "misses",
+      "samples_ns": {
+        "before": [
+          1.15,
+          1.226,
+          1.151,
+          1.13,
+          1.151
+        ],
+        "after": [
+          1.164,
+          1.169,
+          1.164,
+          1.169,
+          1.169
+        ]
+      }
+    },
+    {
+      "keyset": "S&P 500 Tickers",
+      "workload": "mixed",
+      "samples_ns": {
+        "before": [
+          8.637,
+          8.645,
+          8.638,
+          8.654,
+          8.638
+        ],
+        "after": [
+          8.624,
+          8.781,
+          8.587,
+          8.788,
+          8.612
+        ]
+      }
+    },
+    {
+      "keyset": "URL Protocols",
+      "workload": "hits",
+      "samples_ns": {
+        "before": [
+          1.187,
+          1.295,
+          1.272,
+          1.295,
+          1.271
+        ],
+        "after": [
+          1.19,
+          1.295,
+          1.295,
+          1.297,
+          1.296
+        ]
+      }
+    },
+    {
+      "keyset": "URL Protocols",
+      "workload": "misses",
+      "samples_ns": {
+        "before": [
+          0.803,
+          0.876,
+          0.877,
+          0.806,
+          0.877
+        ],
+        "after": [
+          0.877,
+          0.804,
+          0.877,
+          0.877,
+          0.877
+        ]
+      }
+    },
+    {
+      "keyset": "URL Protocols",
+      "workload": "mixed",
+      "samples_ns": {
+        "before": [
+          5.021,
+          5.019,
+          5.462,
+          5.462,
+          5.464
+        ],
+        "after": [
+          5.071,
+          5.492,
+          5.494,
+          5.491,
+          5.499
+        ]
+      }
+    }
+  ],
+  "final_native_object_guard": [
+    {
+      "keyset": "Counters",
+      "workload": "hits",
+      "samples_ns": {
+        "after": [
+          1.88,
+          1.878,
+          1.877,
+          1.88,
+          1.882
+        ],
+        "final": [
+          1.882,
+          1.854,
+          1.835,
+          1.833,
+          1.879
+        ]
+      }
+    },
+    {
+      "keyset": "Counters",
+      "workload": "misses",
+      "samples_ns": {
+        "after": [
+          1.603,
+          1.601,
+          1.601,
+          1.598,
+          1.601
+        ],
+        "final": [
+          1.606,
+          1.604,
+          1.603,
+          1.602,
+          1.603
+        ]
+      }
+    },
+    {
+      "keyset": "Counters",
+      "workload": "mixed",
+      "samples_ns": {
+        "after": [
+          8.385,
+          9.124,
+          9.035,
+          9.044,
+          9.166
+        ],
+        "final": [
+          8.96,
+          8.936,
+          8.934,
+          8.933,
+          8.935
+        ]
+      }
+    },
+    {
+      "keyset": "HTTP Headers",
+      "workload": "hits",
+      "samples_ns": {
+        "after": [
+          1.354,
+          1.354,
+          1.331,
+          1.329,
+          1.355
+        ],
+        "final": [
+          1.33,
+          1.284,
+          1.24,
+          1.355,
+          1.354
+        ]
+      }
+    },
+    {
+      "keyset": "HTTP Headers",
+      "workload": "misses",
+      "samples_ns": {
+        "after": [
+          1.083,
+          0.994,
+          1.083,
+          1.083,
+          1.083
+        ],
+        "final": [
+          0.992,
+          1.073,
+          0.993,
+          1.084,
+          1.083
+        ]
+      }
+    },
+    {
+      "keyset": "HTTP Headers",
+      "workload": "mixed",
+      "samples_ns": {
+        "after": [
+          7.183,
+          7.084,
+          6.693,
+          7.187,
+          7.065
+        ],
+        "final": [
+          7.201,
+          7.168,
+          7.174,
+          7.109,
+          7.061
+        ]
+      }
+    },
+    {
+      "keyset": "HTTP Headers 50",
+      "workload": "hits",
+      "samples_ns": {
+        "after": [
+          1.924,
+          1.925,
+          1.92,
+          1.925,
+          1.928
+        ],
+        "final": [
+          1.929,
+          1.924,
+          1.923,
+          1.924,
+          1.923
+        ]
+      }
+    },
+    {
+      "keyset": "HTTP Headers 50",
+      "workload": "misses",
+      "samples_ns": {
+        "after": [
+          1.656,
+          1.629,
+          1.633,
+          1.655,
+          1.656
+        ],
+        "final": [
+          1.655,
+          1.661,
+          1.623,
+          1.661,
+          1.656
+        ]
+      }
+    },
+    {
+      "keyset": "HTTP Headers 50",
+      "workload": "mixed",
+      "samples_ns": {
+        "after": [
+          8.527,
+          8.532,
+          8.553,
+          8.4,
+          8.545
+        ],
+        "final": [
+          8.493,
+          8.497,
+          8.572,
+          8.627,
+          8.495
+        ]
+      }
+    },
+    {
+      "keyset": "Java FQCNs",
+      "workload": "hits",
+      "samples_ns": {
+        "after": [
+          2.088,
+          2.089,
+          2.089,
+          2.089,
+          2.092
+        ],
+        "final": [
+          2.089,
+          2.096,
+          2.065,
+          2.066,
+          2.088
+        ]
+      }
+    },
+    {
+      "keyset": "Java FQCNs",
+      "workload": "misses",
+      "samples_ns": {
+        "after": [
+          1.844,
+          1.844,
+          1.81,
+          1.844,
+          1.844
+        ],
+        "final": [
+          1.842,
+          1.843,
+          1.844,
+          1.811,
+          1.81
+        ]
+      }
+    },
+    {
+      "keyset": "Java FQCNs",
+      "workload": "mixed",
+      "samples_ns": {
+        "after": [
+          9.406,
+          9.274,
+          9.247,
+          9.349,
+          9.278
+        ],
+        "final": [
+          9.417,
+          8.997,
+          9.22,
+          9.331,
+          9.408
+        ]
+      }
+    },
+    {
+      "keyset": "MIME Types",
+      "workload": "hits",
+      "samples_ns": {
+        "after": [
+          1.542,
+          1.541,
+          1.541,
+          1.514,
+          1.516
+        ],
+        "final": [
+          1.544,
+          1.543,
+          1.515,
+          1.514,
+          1.514
+        ]
+      }
+    },
+    {
+      "keyset": "MIME Types",
+      "workload": "misses",
+      "samples_ns": {
+        "after": [
+          1.272,
+          1.272,
+          1.249,
+          1.273,
+          1.272
+        ],
+        "final": [
+          1.273,
+          1.272,
+          1.272,
+          1.25,
+          1.249
+        ]
+      }
+    },
+    {
+      "keyset": "MIME Types",
+      "workload": "mixed",
+      "samples_ns": {
+        "after": [
+          7.7,
+          7.726,
+          7.71,
+          7.708,
+          7.817
+        ],
+        "final": [
+          7.906,
+          7.823,
+          7.665,
+          7.714,
+          7.791
+        ]
+      }
+    }
+  ],
+  "sample_order": "Runtime sample arrays are ordered by outer round; process order alternated each round.",
+  "sse2_mapped_load_rosetta": [
+    {
+      "round": 0,
+      "variant": "intrinsic",
+      "label": "load16",
+      "ns": 0.513804,
+      "checksum": "checksum=5792550990486550150"
+    },
+    {
+      "round": 0,
+      "variant": "intrinsic",
+      "label": "compare32",
+      "ns": 1.209277,
+      "checksum": "checksum=10050000"
+    },
+    {
+      "round": 0,
+      "variant": "intrinsic",
+      "label": "compare64",
+      "ns": 2.1168,
+      "checksum": "checksum=10050000"
+    },
+    {
+      "round": 0,
+      "variant": "asm",
+      "label": "load16",
+      "ns": 0.555973,
+      "checksum": "checksum=5792550990486550150"
+    },
+    {
+      "round": 0,
+      "variant": "asm",
+      "label": "compare32",
+      "ns": 1.250198,
+      "checksum": "checksum=10050000"
+    },
+    {
+      "round": 0,
+      "variant": "asm",
+      "label": "compare64",
+      "ns": 2.184025,
+      "checksum": "checksum=10050000"
+    },
+    {
+      "round": 1,
+      "variant": "asm",
+      "label": "load16",
+      "ns": 0.538431,
+      "checksum": "checksum=5792550990486550150"
+    },
+    {
+      "round": 1,
+      "variant": "asm",
+      "label": "compare32",
+      "ns": 1.217875,
+      "checksum": "checksum=10050000"
+    },
+    {
+      "round": 1,
+      "variant": "asm",
+      "label": "compare64",
+      "ns": 2.145692,
+      "checksum": "checksum=10050000"
+    },
+    {
+      "round": 1,
+      "variant": "intrinsic",
+      "label": "load16",
+      "ns": 0.512254,
+      "checksum": "checksum=5792550990486550150"
+    },
+    {
+      "round": 1,
+      "variant": "intrinsic",
+      "label": "compare32",
+      "ns": 1.212877,
+      "checksum": "checksum=10050000"
+    },
+    {
+      "round": 1,
+      "variant": "intrinsic",
+      "label": "compare64",
+      "ns": 2.107287,
+      "checksum": "checksum=10050000"
+    },
+    {
+      "round": 2,
+      "variant": "intrinsic",
+      "label": "load16",
+      "ns": 0.501096,
+      "checksum": "checksum=5792550990486550150"
+    },
+    {
+      "round": 2,
+      "variant": "intrinsic",
+      "label": "compare32",
+      "ns": 1.172052,
+      "checksum": "checksum=10050000"
+    },
+    {
+      "round": 2,
+      "variant": "intrinsic",
+      "label": "compare64",
+      "ns": 2.074685,
+      "checksum": "checksum=10050000"
+    },
+    {
+      "round": 2,
+      "variant": "asm",
+      "label": "load16",
+      "ns": 0.539052,
+      "checksum": "checksum=5792550990486550150"
+    },
+    {
+      "round": 2,
+      "variant": "asm",
+      "label": "compare32",
+      "ns": 1.246196,
+      "checksum": "checksum=10050000"
+    },
+    {
+      "round": 2,
+      "variant": "asm",
+      "label": "compare64",
+      "ns": 2.216975,
+      "checksum": "checksum=10050000"
+    },
+    {
+      "round": 3,
+      "variant": "asm",
+      "label": "load16",
+      "ns": 0.54401,
+      "checksum": "checksum=5792550990486550150"
+    },
+    {
+      "round": 3,
+      "variant": "asm",
+      "label": "compare32",
+      "ns": 1.214071,
+      "checksum": "checksum=10050000"
+    },
+    {
+      "round": 3,
+      "variant": "asm",
+      "label": "compare64",
+      "ns": 2.140567,
+      "checksum": "checksum=10050000"
+    },
+    {
+      "round": 3,
+      "variant": "intrinsic",
+      "label": "load16",
+      "ns": 0.498415,
+      "checksum": "checksum=5792550990486550150"
+    },
+    {
+      "round": 3,
+      "variant": "intrinsic",
+      "label": "compare32",
+      "ns": 1.165133,
+      "checksum": "checksum=10050000"
+    },
+    {
+      "round": 3,
+      "variant": "intrinsic",
+      "label": "compare64",
+      "ns": 2.07819,
+      "checksum": "checksum=10050000"
+    },
+    {
+      "round": 4,
+      "variant": "intrinsic",
+      "label": "load16",
+      "ns": 0.495173,
+      "checksum": "checksum=5792550990486550150"
+    },
+    {
+      "round": 4,
+      "variant": "intrinsic",
+      "label": "compare32",
+      "ns": 1.165167,
+      "checksum": "checksum=10050000"
+    },
+    {
+      "round": 4,
+      "variant": "intrinsic",
+      "label": "compare64",
+      "ns": 2.075833,
+      "checksum": "checksum=10050000"
+    },
+    {
+      "round": 4,
+      "variant": "asm",
+      "label": "load16",
+      "ns": 0.540456,
+      "checksum": "checksum=5792550990486550150"
+    },
+    {
+      "round": 4,
+      "variant": "asm",
+      "label": "compare32",
+      "ns": 1.21939,
+      "checksum": "checksum=10050000"
+    },
+    {
+      "round": 4,
+      "variant": "asm",
+      "label": "compare64",
+      "ns": 2.14854,
+      "checksum": "checksum=10050000"
+    },
+    {
+      "round": 5,
+      "variant": "asm",
+      "label": "load16",
+      "ns": 0.537563,
+      "checksum": "checksum=5792550990486550150"
+    },
+    {
+      "round": 5,
+      "variant": "asm",
+      "label": "compare32",
+      "ns": 1.215829,
+      "checksum": "checksum=10050000"
+    },
+    {
+      "round": 5,
+      "variant": "asm",
+      "label": "compare64",
+      "ns": 2.144469,
+      "checksum": "checksum=10050000"
+    },
+    {
+      "round": 5,
+      "variant": "intrinsic",
+      "label": "load16",
+      "ns": 0.495642,
+      "checksum": "checksum=5792550990486550150"
+    },
+    {
+      "round": 5,
+      "variant": "intrinsic",
+      "label": "compare32",
+      "ns": 1.167121,
+      "checksum": "checksum=10050000"
+    },
+    {
+      "round": 5,
+      "variant": "intrinsic",
+      "label": "compare64",
+      "ns": 2.072183,
+      "checksum": "checksum=10050000"
+    },
+    {
+      "round": 6,
+      "variant": "intrinsic",
+      "label": "load16",
+      "ns": 0.494315,
+      "checksum": "checksum=5792550990486550150"
+    },
+    {
+      "round": 6,
+      "variant": "intrinsic",
+      "label": "compare32",
+      "ns": 1.169304,
+      "checksum": "checksum=10050000"
+    },
+    {
+      "round": 6,
+      "variant": "intrinsic",
+      "label": "compare64",
+      "ns": 2.07461,
+      "checksum": "checksum=10050000"
+    },
+    {
+      "round": 6,
+      "variant": "asm",
+      "label": "load16",
+      "ns": 0.539835,
+      "checksum": "checksum=5792550990486550150"
+    },
+    {
+      "round": 6,
+      "variant": "asm",
+      "label": "compare32",
+      "ns": 1.22005,
+      "checksum": "checksum=10050000"
+    },
+    {
+      "round": 6,
+      "variant": "asm",
+      "label": "compare64",
+      "ns": 2.147948,
+      "checksum": "checksum=10050000"
+    }
+  ]
+}
