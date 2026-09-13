@@ -147,12 +147,6 @@ you the same `#include` and the same code.
 plus the `fixed_string.h` dependency, in one file. Grab it and compile:
 
 ```bash
-curl -O https://raw.githubusercontent.com/ConstexprCore/perfect_hash/v0.2.0/singleheader/perfect_hash.h
-```
-
-or, from the release assets:
-
-```bash
 curl -LO https://github.com/ConstexprCore/perfect_hash/releases/download/v0.2.0/perfect_hash.h
 ```
 
@@ -168,8 +162,7 @@ constexpr auto methods = ConstexprCore::make_perfect_set<"GET", "POST", "PUT">()
 c++ -std=c++23 -O2 main.cpp -o main
 ```
 
-Use `.../refs/heads/main/singleheader/perfect_hash.h` instead of a tag if you
-want the development version. To regenerate the file from a checkout:
+To regenerate the file from a checkout:
 
 ```bash
 python3 singleheader/amalgamate.py          # writes singleheader/perfect_hash.h
@@ -264,25 +257,6 @@ ctest --test-dir build
 Options: `PH_BUILD_TESTS`, `PH_BUILD_BENCHMARKS`, `PH_BUILD_EXAMPLES` and
 `PH_INSTALL` all default to `ON` for a top-level build and `OFF` when the
 project is consumed from another CMake project.
-
-### Releasing
-
-`tools/release.py` bumps the version in `CMakeLists.txt`, the version header
-and the README download URLs, regenerates the amalgamation, commits and tags:
-
-```bash
-python3 tools/release.py 0.2.0 --dry-run   # show what would change
-python3 tools/release.py 0.2.0             # write, commit, tag (does not push)
-python3 tools/release.py --minor           # or bump instead of naming a version
-```
-
-It refuses to run off `main` or with modified tracked files, and prints the
-`git push` command rather than pushing for you.
-
-To cut a release from CI instead, run the **Release** workflow from the Actions
-tab (or `gh workflow run release.yml -f bump=minor`): it performs the same
-bump, verifies the header builds against the standard library alone, pushes,
-and publishes a GitHub release with `singleheader/perfect_hash.h` attached.
 
 A smoke test for the generated header is also included in the test suite and can
 be run with:
