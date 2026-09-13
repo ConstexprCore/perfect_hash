@@ -1,0 +1,555 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>perfect_hash — Billion-query-per-second lookup tables in C++</title>
+<meta name="description" content="Compile-time perfect hashing for C++. Build zero-collision hash sets and maps entirely at compile time. Optimized for speed !">
+<meta property="og:title" content="perfect_hash — Billion-query-per-second lookup tables in C++">
+<meta property="og:description" content="Compile-time perfect hashing for C++. Build zero-collision hash sets and maps entirely at compile time. Optimized for speed !">
+<meta property="og:type" content="website">
+<meta property="og:url" content="https://constexprcore.github.io/perfect_hash/">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'><text y='13' font-size='13'>⚡</text></svg>">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github-dark.min.css">
+</head>
+<body>
+
+<div class="topbar">
+  <div class="wrap">
+    <a class="brand" href="./">ConstexprCore/perfect_hash</a>
+    <span class="tag">v0.2.0</span>
+    <nav>
+      <a href="#usage">Usage</a>
+      <a href="#installing-it">Install</a>
+      <a href="#how-it-works">How it works</a>
+      <a href="https://github.com/ConstexprCore/perfect_hash">GitHub</a>
+    </nav>
+  </div>
+</div>
+
+<section class="hero">
+  <div class="wrap hero-grid">
+    <div>
+      <h1>Billion-query-per-second lookup tables in C++</h1>
+      <p class="lede">Compile-time perfect hashing for C++. Build zero-collision hash sets and maps entirely at compile time. Optimized for speed !</p>
+      <div class="cta">
+        <a class="btn btn-primary" href="https://github.com/ConstexprCore/perfect_hash/releases/download/v0.2.0/perfect_hash.h">Download perfect_hash.h</a>
+        <a class="btn btn-ghost" href="https://github.com/ConstexprCore/perfect_hash">View on GitHub</a>
+      </div>
+    </div>
+    <div class="codecard">
+      <header>
+        <span class="dot" style="background:#ff5f57"></span>
+        <span class="dot" style="background:#febc2e"></span>
+        <span class="dot" style="background:#28c840"></span>
+        <span style="margin-left:6px">main.cpp</span>
+      </header>
+      <pre><code class="language-cpp">#include &quot;perfect_hash.h&quot;
+
+using namespace ConstexprCore;
+
+constexpr auto methods = make_perfect_map&lt;
+    kv&lt;&quot;GET&quot;,    Method::GET&gt;,
+    kv&lt;&quot;POST&quot;,   Method::POST&gt;,
+    kv&lt;&quot;PUT&quot;,    Method::PUT&gt;,
+    kv&lt;&quot;DELETE&quot;, Method::DELETE&gt;&gt;();
+
+// Table built at compile time. Lookup is a
+// handful of instructions, zero collisions.
+std::optional&lt;Method&gt; parse(std::string_view s) {
+    return methods.lookup(s);
+}</code></pre>
+    </div>
+  </div>
+</section>
+
+<section class="stats">
+  <div class="wrap">
+    <div class="stat"><div class="n">1.08 B/s</div><div class="l">lookups per second, single core</div></div>
+    <div class="stat"><div class="n">0</div><div class="l">collisions, by construction</div></div>
+    <div class="stat"><div class="n">1</div><div class="l">header, no dependencies</div></div>
+    <div class="stat"><div class="n">C++23</div><div class="l">header-only, consteval</div></div>
+  </div>
+</section>
+
+<div class="wrap layout">
+  <aside class="toc">
+    <h2>On this page</h2>
+    <ul>
+      <li class="h2"><a href="#ridiculously-fast">Ridiculously fast</a></li>
+      <li class="h2"><a href="#usage">Usage</a></li>
+      <li class="h3"><a href="#perfect-hash-set">Perfect hash set</a></li>
+      <li class="h3"><a href="#perfect-hash-map">Perfect hash map</a></li>
+      <li class="h3"><a href="#large-key-sets-more-than-255-keys">Large key sets (more than 255 keys)</a></li>
+      <li class="h3"><a href="#long-keys-more-than-32-bytes">Long keys (more than 32 bytes)</a></li>
+      <li class="h2"><a href="#installing-it">Installing it</a></li>
+      <li class="h3"><a href="#drop-in-one-header-no-build-system-no-dependencies">Drop in one header (no build system, no dependencies)</a></li>
+      <li class="h2"><a href="#using-it-as-a-cmake-dependency">Using it as a CMake dependency</a></li>
+      <li class="h3"><a href="#fetchcontent">FetchContent</a></li>
+      <li class="h3"><a href="#find-package">find_package</a></li>
+      <li class="h3"><a href="#verifying-all-three">Verifying all three</a></li>
+      <li class="h2"><a href="#building">Building</a></li>
+      <li class="h3"><a href="#precompiled-headers-pch-for-faster-compiles">Precompiled headers (PCH) for faster compiles</a></li>
+      <li class="h3"><a href="#tests">Tests</a></li>
+      <li class="h3"><a href="#benchmarks">Benchmarks</a></li>
+      <li class="h2"><a href="#how-it-works">How it works</a></li>
+      <li class="h2"><a href="#license">License</a></li>
+    </ul>
+  </aside>
+  <main class="prose">
+<h2 id="ridiculously-fast">Ridiculously fast<a class="anchor" href="#ridiculously-fast" aria-label="Link to this section">#</a></h2>
+<p>We use an association-value algorithm computed entirely in <code>consteval</code> context, producing <code>O(1)</code> lookups with no runtime construction cost. You can precompile your header files for fast compile time.</p>
+<p>Using an Apple M4 processor, with the URL protocol keys (<code>http</code>, <code>https</code>, <code>ftp</code>, <code>ws</code>, <code>wss</code>, <code>file</code>), we classify them as over 1 billion keys per second. It is four times faster than our closest competitor and ten times faster than the standard <code>std::unordered_map</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>billion queries/s</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>ours</strong></td>
+<td>1.08</td>
+</tr>
+<tr>
+<td>gperf  (command line)</td>
+<td>0.23</td>
+</tr>
+<tr>
+<td>kronuz::phf</td>
+<td>0.22</td>
+</tr>
+<tr>
+<td>frozen::unordered_map</td>
+<td>0.16</td>
+</tr>
+<tr>
+<td>absl::flat_hash_map</td>
+<td>0.14</td>
+</tr>
+<tr>
+<td>pthash</td>
+<td>0.14</td>
+</tr>
+<tr>
+<td>naive</td>
+<td>0.19</td>
+</tr>
+<tr>
+<td>std::unordered_map</td>
+<td>0.10</td>
+</tr>
+<tr>
+<td>ankerl::dense_hash_map</td>
+<td>0.10</td>
+</tr>
+</tbody>
+</table>
+<h2 id="usage">Usage<a class="anchor" href="#usage" aria-label="Link to this section">#</a></h2>
+<h3 id="perfect-hash-set">Perfect hash set<a class="anchor" href="#perfect-hash-set" aria-label="Link to this section">#</a></h3>
+<pre><code class="language-cpp">#include &lt;ConstexprCore/perfect_hash.h&gt;
+
+using namespace ConstexprCore;
+
+constexpr auto methods = make_perfect_set&lt;&quot;GET&quot;, &quot;POST&quot;, &quot;PUT&quot;, &quot;DELETE&quot;, &quot;PATCH&quot;&gt;();
+
+bool is_valid_method(std::string_view s) {
+    return methods.contains(s);
+}
+</code></pre>
+<h3 id="perfect-hash-map">Perfect hash map<a class="anchor" href="#perfect-hash-map" aria-label="Link to this section">#</a></h3>
+<pre><code class="language-cpp">#include &lt;ConstexprCore/perfect_hash.h&gt;
+
+using namespace ConstexprCore;
+
+enum class Method { GET, POST, PUT, DELETE, PATCH };
+
+constexpr auto methods = make_perfect_map&lt;
+    kv&lt;&quot;GET&quot;,    Method::GET&gt;,
+    kv&lt;&quot;POST&quot;,   Method::POST&gt;,
+    kv&lt;&quot;PUT&quot;,    Method::PUT&gt;,
+    kv&lt;&quot;DELETE&quot;, Method::DELETE&gt;,
+    kv&lt;&quot;PATCH&quot;,  Method::PATCH&gt;
+&gt;();
+
+std::optional&lt;Method&gt; parse_method(std::string_view s) {
+    return methods.lookup(s);
+}
+</code></pre>
+<h3 id="large-key-sets-more-than-255-keys">Large key sets (more than 255 keys)<a class="anchor" href="#large-key-sets-more-than-255-keys" aria-label="Link to this section">#</a></h3>
+<p>The same two factories keep working past 255 entries: they switch to the <em>wide</em> container
+(<code>wide_perfect_hash_set</code> / <code>wide_perfect_hash_map</code>, header <code>wide_perfect_hash.h</code>), which
+replaces gperf's chosen byte positions with a whole-key multiplicative hash plus a small
+per-bucket pilot table. The fast hash uses one multiply per 64-bit key lane. Keys up to
+7 bytes need just one lane; values that fit in its spare bytes are stored inside the
+key word itself. Larger keys need more lanes, and difficult sets can select a stronger
+hash at compile time. For generated key lists, pass a static-storage array by reference:</p>
+<pre><code class="language-cpp">#include &lt;ConstexprCore/wide_perfect_hash.h&gt;
+
+inline constexpr std::array&lt;std::string_view, 5581&gt; nasdaq_symbols = { &quot;AAAP&quot;, &quot;AACG&quot;, /* ... */ };
+
+// values = declaration index, in the smallest integer type that fits
+constexpr auto tickers = ConstexprCore::make_wide_perfect_index_map&lt;nasdaq_symbols&gt;();
+
+// or with your own values
+inline constexpr std::array&lt;int, 5581&gt; ids = { /* ... */ };
+constexpr auto tickers2 = ConstexprCore::make_wide_perfect_map&lt;nasdaq_symbols, ids&gt;();
+
+std::optional&lt;std::uint16_t&gt; id = tickers.lookup(&quot;AAPL&quot;);   // ~1.7 ns on an M3 Max
+</code></pre>
+<p>Measured (Apple M3 Max, shuffled hits): S&amp;P 500 (503 symbols) <strong>1.2 ns</strong>, all Nasdaq-listed
+symbols (5 581) <strong>1.7 ns</strong> — versus 2.4 / 3.0 ns for packing the symbol into a <code>uint64_t</code>
+and probing <code>absl::flat_hash_map</code>, 4.8 / 5.9 ns for a 27-ary array trie, and 7.6 / 6.6 ns
+for <code>absl::flat_hash_map&lt;std::string_view, int&gt;</code>. Building the 5 581-key map takes ~5 s of
+compile time; raise <code>-fconstexpr-steps</code> (clang) / <code>-fconstexpr-ops-limit</code> (GCC) as the
+benchmarks' <code>CMakeLists.txt</code> does.</p>
+<h3 id="long-keys-more-than-32-bytes">Long keys (more than 32 bytes)<a class="anchor" href="#long-keys-more-than-32-bytes" aria-label="Link to this section">#</a></h3>
+<p>Keys up to 4 080 bytes are supported by the wide container; the factories also select
+it when keys exceed the classic container's 254-byte limit. On SIMD targets, longer
+keys use a fixed number of 16-byte chunk compares. The NEON 17–32-byte comparison
+uses branch-free, shift-realigned loads; SSE2 and LSX use a page guard. Scalar targets
+use byte loads. 40
+fully-qualified Java class names (24–54 bytes): <strong>2.05 ns</strong> per lookup, where the
+previous scalar byte loop took 23 ns. Single-byte sets with at most 255 keys use a
+direct table.</p>
+<p>The factories pick the wide container only when the classic one cannot be used (more
+than 255 keys, or keys of 255+ bytes). For short-key sets that fit the classic container
+you can still call <code>make_wide_perfect_set</code> / <code>make_wide_perfect_map</code> explicitly, but
+measure first: the wide lookup trades latency for throughput, so it wins on predictable
+all-hit streams for larger sets (S&amp;P 100: 1.77 → 1.32 ns on an M3 Max) and loses on
+small sets and on mixed hit/miss streams (C++ Keywords, N = 15: +17 % hits / +30 % misses
+on a Xeon with GCC 14).</p>
+<p>Generation verifies every stored key at compile time and reports an error if its
+bounded seed/placement search fails. In wide sets whose maximum key length is at least
+16 bytes, keys that differ only by trailing NUL bytes are currently rejected because
+their zero-padded hash lanes are identical.</p>
+<p>The <a href="docs/pr30_review.md">PR review measurements</a> record the retained compile-time
+improvement, correctness fixes, rejected optimization, and local validation.</p>
+<h2 id="installing-it">Installing it<a class="anchor" href="#installing-it" aria-label="Link to this section">#</a></h2>
+<p>Three ways, in increasing order of build-system involvement. All of them give
+you the same <code>#include</code> and the same code.</p>
+<h3 id="drop-in-one-header-no-build-system-no-dependencies">Drop in one header (no build system, no dependencies)<a class="anchor" href="#drop-in-one-header-no-build-system-no-dependencies" aria-label="Link to this section">#</a></h3>
+<p><code>singleheader/perfect_hash.h</code> is a self-contained amalgamation — the library
+plus the <code>fixed_string.h</code> dependency, in one file. Grab it and compile:</p>
+<pre><code class="language-bash">curl -LO https://github.com/ConstexprCore/perfect_hash/releases/download/v0.2.0/perfect_hash.h
+</code></pre>
+<p>Then just include it:</p>
+<pre><code class="language-cpp">#include &quot;perfect_hash.h&quot;
+
+constexpr auto methods = ConstexprCore::make_perfect_set&lt;&quot;GET&quot;, &quot;POST&quot;, &quot;PUT&quot;&gt;();
+</code></pre>
+<pre><code class="language-bash">c++ -std=c++23 -O2 main.cpp -o main
+</code></pre>
+<p>To regenerate the file from a checkout:</p>
+<pre><code class="language-bash">python3 singleheader/amalgamate.py          # writes singleheader/perfect_hash.h
+python3 singleheader/amalgamate.py --test   # ...and compiles the demo against it
+python3 singleheader/amalgamate.py --check  # CI: fail if the checked-in copy is stale
+</code></pre>
+<p>The script walks the include graph from <code>include/ConstexprCore/perfect_hash.h</code>,
+splices each project header in where it is included — in place, so the SIMD
+helpers stay behind their <code>#if</code> guards — and leaves system includes alone. A
+CMake build also produces <code>build/singleheader/perfect_hash.h</code> via the
+<code>perfect_hash_singleheader</code> target, and <code>perfect_hash_singleheader_update</code>
+refreshes the copy in the source tree.</p>
+<h2 id="using-it-as-a-cmake-dependency">Using it as a CMake dependency<a class="anchor" href="#using-it-as-a-cmake-dependency" aria-label="Link to this section">#</a></h2>
+<h3 id="fetchcontent">FetchContent<a class="anchor" href="#fetchcontent" aria-label="Link to this section">#</a></h3>
+<p>Nothing else to declare: the <code>useful_abstractions</code> dependency is fetched for
+you, and tests, benchmarks and examples switch themselves off when perfect_hash
+is not the top-level project.</p>
+<pre><code class="language-cmake">include(FetchContent)
+FetchContent_Declare(
+    perfect_hash
+    GIT_REPOSITORY https://github.com/ConstexprCore/perfect_hash.git
+    GIT_TAG        v0.2.0
+)
+FetchContent_MakeAvailable(perfect_hash)
+
+add_executable(my_app main.cpp)
+target_link_libraries(my_app PRIVATE ConstexprCore::perfect_hash)
+target_compile_features(my_app PRIVATE cxx_std_23)
+</code></pre>
+<p><code>add_subdirectory(perfect_hash)</code> on a vendored checkout works the same way.</p>
+<h3 id="find-package">find_package<a class="anchor" href="#find-package" aria-label="Link to this section">#</a></h3>
+<p>Install the project once:</p>
+<pre><code class="language-bash">cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
+cmake --build build
+cmake --install build
+</code></pre>
+<p>then consume it from anywhere:</p>
+<pre><code class="language-cmake">find_package(perfect_hash 0.2 REQUIRED)
+
+add_executable(my_app main.cpp)
+target_link_libraries(my_app PRIVATE ConstexprCore::perfect_hash)
+</code></pre>
+<p>What gets installed is the <em>amalgamated</em> header, placed at the same include
+path the sources use, so an installed copy pulls in no dependency of its own:</p>
+<pre><code class="language-cpp">#include &lt;ConstexprCore/perfect_hash.h&gt;   // works from source and from an install
+#include &lt;perfect_hash.h&gt;                 // also installed, for drop-in style
+</code></pre>
+<p>Add <code>-DCMAKE_PREFIX_PATH=&lt;prefix&gt;</code> when you install somewhere CMake does not
+search by default. Pass <code>-DPH_INSTALL=OFF</code> to suppress the install rules when
+embedding the project in a larger build.</p>
+<h3 id="verifying-all-three">Verifying all three<a class="anchor" href="#verifying-all-three" aria-label="Link to this section">#</a></h3>
+<p><code>tools/test_packaging.py</code> builds and runs a real consumer for each path — the
+drop-in header, FetchContent, and <code>find_package</code> against an install tree:</p>
+<pre><code class="language-bash">python3 tools/test_packaging.py
+python3 tools/test_packaging.py --only dropin
+</code></pre>
+<p>The consumer projects live in <code>tests/packaging/</code>.</p>
+<h2 id="building">Building<a class="anchor" href="#building" aria-label="Link to this section">#</a></h2>
+<p>Requires a C++23 compiler and CMake 3.20+.</p>
+<pre><code class="language-bash">cmake -B build
+cmake --build build
+ctest --test-dir build
+</code></pre>
+<p>Options: <code>PH_BUILD_TESTS</code>, <code>PH_BUILD_BENCHMARKS</code>, <code>PH_BUILD_EXAMPLES</code> and
+<code>PH_INSTALL</code> all default to <code>ON</code> for a top-level build and <code>OFF</code> when the
+project is consumed from another CMake project.</p>
+<p>A smoke test for the generated header is also included in the test suite and can
+be run with:</p>
+<pre><code class="language-bash">ctest --test-dir build --output-on-failure -R phf_singleheader_smoke
+</code></pre>
+<h3 id="precompiled-headers-pch-for-faster-compiles">Precompiled headers (PCH) for faster compiles<a class="anchor" href="#precompiled-headers-pch-for-faster-compiles" aria-label="Link to this section">#</a></h3>
+<p>Calling <code>make_constexpr_perfect_map</code> on large sets of keys can require relatively long compile time (more than milliseconds). The solution is to use precompiled headers.</p>
+<p>If you are experimenting with a heavy header like <code>fun.h</code>, a precompiled header
+can significantly reduce incremental compile time for <code>fun.cpp</code>.</p>
+<p>For example, use the following as your <code>fun.h</code> header, it contains the call to <code>make_perfect_map</code>.</p>
+<pre><code class="language-cpp">#pragma once
+#include &quot;perfect_hash.h&quot;
+
+#include &lt;optional&gt;
+
+enum class HttpMethod {
+    get,
+    post,
+    put,
+    patch,
+    head,
+    options_,
+    trace,
+    connect,
+    propfind,
+    proppatch,
+    mkcol,
+    copy,
+    move,
+    lock,
+    unlock,
+    report,
+    mkactivity,
+    checkout,
+    merge,
+    msearch,
+    notify,
+    subscribe,
+    unsubscribe,
+    purge,
+    link,
+    unlink
+};
+
+constexpr auto methods = ConstexprCore::make_perfect_map&lt;
+    ConstexprCore::kv&lt;&quot;GET&quot;, HttpMethod::get&gt;,
+    ConstexprCore::kv&lt;&quot;POST&quot;, HttpMethod::post&gt;,
+    ConstexprCore::kv&lt;&quot;PUT&quot;, HttpMethod::put&gt;,
+    ConstexprCore::kv&lt;&quot;PATCH&quot;, HttpMethod::patch&gt;,
+    ConstexprCore::kv&lt;&quot;HEAD&quot;, HttpMethod::head&gt;,
+    ConstexprCore::kv&lt;&quot;OPTIONS&quot;, HttpMethod::options_&gt;,
+    ConstexprCore::kv&lt;&quot;TRACE&quot;, HttpMethod::trace&gt;,
+    ConstexprCore::kv&lt;&quot;CONNECT&quot;, HttpMethod::connect&gt;,
+    ConstexprCore::kv&lt;&quot;PROPFIND&quot;, HttpMethod::propfind&gt;,
+    ConstexprCore::kv&lt;&quot;PROPPATCH&quot;, HttpMethod::proppatch&gt;,
+    ConstexprCore::kv&lt;&quot;MKCOL&quot;, HttpMethod::mkcol&gt;,
+    ConstexprCore::kv&lt;&quot;COPY&quot;, HttpMethod::copy&gt;,
+    ConstexprCore::kv&lt;&quot;MOVE&quot;, HttpMethod::move&gt;,
+    ConstexprCore::kv&lt;&quot;LOCK&quot;, HttpMethod::lock&gt;,
+    ConstexprCore::kv&lt;&quot;UNLOCK&quot;, HttpMethod::unlock&gt;,
+    ConstexprCore::kv&lt;&quot;REPORT&quot;, HttpMethod::report&gt;,
+    ConstexprCore::kv&lt;&quot;MKACTIVITY&quot;, HttpMethod::mkactivity&gt;,
+    ConstexprCore::kv&lt;&quot;CHECKOUT&quot;, HttpMethod::checkout&gt;,
+    ConstexprCore::kv&lt;&quot;MERGE&quot;, HttpMethod::merge&gt;,
+    ConstexprCore::kv&lt;&quot;MSEARCH&quot;, HttpMethod::msearch&gt;,
+    ConstexprCore::kv&lt;&quot;NOTIFY&quot;, HttpMethod::notify&gt;,
+    ConstexprCore::kv&lt;&quot;SUBSCRIBE&quot;, HttpMethod::subscribe&gt;,
+    ConstexprCore::kv&lt;&quot;UNSUBSCRIBE&quot;, HttpMethod::unsubscribe&gt;,
+    ConstexprCore::kv&lt;&quot;PURGE&quot;, HttpMethod::purge&gt;,
+    ConstexprCore::kv&lt;&quot;LINK&quot;, HttpMethod::link&gt;,
+    ConstexprCore::kv&lt;&quot;UNLINK&quot;, HttpMethod::unlink&gt;
+&gt;();
+</code></pre>
+<p>and <code>fun.cpp</code> might be as follows.</p>
+<pre><code class="language-cpp">#include &quot;fun.h&quot;
+int main() {
+    auto post = methods.lookup(&quot;POST&quot;);
+    if (!post || *post != HttpMethod::post) {
+        return 1;
+    }
+    if (methods.contains(&quot;DELETE&quot;)) {
+        return 1;
+    }
+    return 0;
+}
+</code></pre>
+<p>As long as you do not change the header, the map will remained precomputed and your compile
+times will be fast.</p>
+<p>Using GCC from the command line:</p>
+<pre><code class="language-bash">g++ -std=c++23 -O2 -x c++-header fun.h -o fun.h.gch
+g++ -std=c++23 -O2 fun.cpp -o fun
+</code></pre>
+<p>With CMake, the equivalent is <code>target_precompile_headers</code>:</p>
+<pre><code class="language-cmake">add_executable(fun_demo fun.cpp)
+target_precompile_headers(fun_demo PRIVATE
+        &quot;${CMAKE_CURRENT_SOURCE_DIR}/fun.h&quot;
+)
+target_compile_features(fun_demo PRIVATE cxx_std_23)
+</code></pre>
+<p>Then build as usual:</p>
+<pre><code class="language-bash">cmake -S . -B build
+cmake --build build --target fun_demo
+</code></pre>
+<p>This lets CMake manage the compiler-specific PCH details automatically.</p>
+<h3 id="tests">Tests<a class="anchor" href="#tests" aria-label="Link to this section">#</a></h3>
+<p>Tests are built by default (<code>PH_BUILD_TESTS=ON</code>):</p>
+<pre><code class="language-bash">ctest --test-dir build --output-on-failure
+</code></pre>
+<h3 id="benchmarks">Benchmarks<a class="anchor" href="#benchmarks" aria-label="Link to this section">#</a></h3>
+<pre><code class="language-bash">cmake -B build -DPH_BUILD_BENCHMARKS=ON
+cmake --build build
+./build/benchmarks/bench_protocol
+</code></pre>
+<p>Run a filtered subset with <code>--filter</code>:</p>
+<pre><code class="language-bash">./build/benchmarks/bench_protocol --filter hits,make_perfect_map,protocol
+./build/benchmarks/bench_protocol --filter hits,misses,stock
+./build/benchmarks/bench_protocol --verify
+</code></pre>
+<h4 id="benchmark-design">Benchmark design<a class="anchor" href="#benchmark-design" aria-label="Link to this section">#</a></h4>
+<p>The benchmark suite compares multiple lookup strategies across key sets of varying size and key length:</p>
+<table>
+<thead>
+<tr>
+<th>Key set</th>
+<th>Filter token</th>
+<th>N</th>
+<th>MaxKeyLen</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>URL Protocols</td>
+<td><code>protocol</code></td>
+<td>6</td>
+<td>5</td>
+<td>Short keys, small set</td>
+</tr>
+<tr>
+<td>S&amp;P 100 Tickers</td>
+<td><code>stock</code></td>
+<td>100</td>
+<td>5</td>
+<td>100 short keys — H&amp;D algorithm</td>
+</tr>
+<tr>
+<td>C++ Keywords</td>
+<td><code>keyword</code></td>
+<td>15</td>
+<td>6</td>
+<td>Medium-sized set</td>
+</tr>
+<tr>
+<td>HTTP Headers</td>
+<td><code>header</code></td>
+<td>20</td>
+<td>17</td>
+<td>Long keys — H&amp;D algorithm</td>
+</tr>
+<tr>
+<td>MIME Types</td>
+<td><code>mime</code></td>
+<td>15</td>
+<td>24</td>
+<td>Long keys, slashes</td>
+</tr>
+<tr>
+<td>Letters a-z</td>
+<td><code>letters</code></td>
+<td>26</td>
+<td>1</td>
+<td>All same length — direct lookup fast path</td>
+</tr>
+<tr>
+<td>HTTP Headers 50</td>
+<td><code>headers50</code></td>
+<td>50</td>
+<td>19</td>
+<td>Realistic large header set</td>
+</tr>
+<tr>
+<td>JavaScript Reserved Words</td>
+<td><code>jsreserved</code></td>
+<td>45</td>
+<td>10</td>
+<td>Medium keys, dense set</td>
+</tr>
+</tbody>
+</table>
+<p>Each key set is tested with three query mixes (positive-only, negative-only, and mixed — a uniform sample over the concatenated hit and miss pools, so the hit ratio follows the pool sizes) against:</p>
+<ul>
+<li><strong><code>make_perfect_map</code></strong> — this library's compile-time PHF</li>
+<li><strong><code>gperf</code></strong> — GNU <code>gperf</code>-generated lookup</li>
+<li><strong><code>std::unordered_map</code></strong> — stdlib hash table</li>
+<li><strong><code>ankerl::unordered_dense</code></strong> — fast flat hash map</li>
+<li><strong><code>absl::flat_hash_map</code></strong> — Google's SwissTable</li>
+<li><strong><code>frozen::unordered_map</code></strong> — compile-time perfect hash</li>
+<li><strong><code>kronuz::phf</code></strong> — hash-based perfect hash</li>
+<li><strong><code>pthash</code></strong> — PTHash minimal perfect hash</li>
+<li><strong>Naive</strong> — if/else chain (binary search for the 100-key ticker set)</li>
+</ul>
+<p>The gperf <code>.inc</code> baselines are pre-generated from the <code>.gperf</code> input files in <code>benchmarks/</code> using <code>gperf &lt;file&gt;.gperf &gt; &lt;file&gt;_gperf.inc</code>.</p>
+<h2 id="how-it-works">How it works<a class="anchor" href="#how-it-works" aria-label="Link to this section">#</a></h2>
+<p>The generator runs at compile time in two phases:</p>
+<ol>
+<li><strong>Position selection</strong> — choose a minimal set of character positions that distinguish all keys. Positions are ranked by discriminating power and selected via a bounded backtracking search.</li>
+<li><strong>Association-value solving</strong> — assign a value to each character such that <code>h(key) = len(key) + sum(asso[key[pos]])</code> maps every key to a unique slot. Collisions are resolved iteratively by bumping the least-frequent character's association value.</li>
+</ol>
+<p>At runtime, only the flat <code>asso_values</code> table, the selected positions, and a slot-to-key mapping survive — the lookup is a few additions and a single string comparison.</p>
+<h2 id="license">License<a class="anchor" href="#license" aria-label="Link to this section">#</a></h2>
+<p>MIT</p>
+  </main>
+</div>
+
+<footer class="site">
+  <div class="wrap">
+    <div>Apache 2.0 / MIT licensed.</div>
+    <div>Generated from README.md on 2026-09-13 · <a href="https://github.com/ConstexprCore/perfect_hash">source</a></div>
+  </div>
+</footer>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+<script>
+  if (window.hljs) { hljs.highlightAll(); }
+
+  // Copy button on every code block.
+  document.querySelectorAll('pre').forEach(function (pre) {
+    var wrap = document.createElement('div');
+    wrap.className = 'copy-wrap';
+    pre.parentNode.insertBefore(wrap, pre);
+    wrap.appendChild(pre);
+
+    var button = document.createElement('button');
+    button.className = 'copy-btn';
+    button.type = 'button';
+    button.textContent = 'Copy';
+    button.addEventListener('click', function () {
+      navigator.clipboard.writeText(pre.innerText).then(function () {
+        button.textContent = 'Copied';
+        setTimeout(function () { button.textContent = 'Copy'; }, 1400);
+      });
+    });
+    wrap.appendChild(button);
+  });
+</script>
+</body>
+</html>
