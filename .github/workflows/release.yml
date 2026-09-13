@@ -109,7 +109,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           cat > release_notes.md <<EOF
-          ## perfect_hash v${VERSION}
+          ## Version ${VERSION}
 
           Compile-time perfect hashing for C++23.
 
@@ -147,7 +147,7 @@ jobs:
 
           gh release create "v${VERSION}" \
             singleheader/perfect_hash.h \
-            --title "perfect_hash v${VERSION}" \
+            --title "Version ${VERSION}" \
             --notes-file release_notes.md
 
           {
