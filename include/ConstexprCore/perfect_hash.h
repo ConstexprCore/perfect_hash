@@ -1,6 +1,7 @@
 #ifndef CONSTEXPRCORE_PERFECT_HASH_H
 #define CONSTEXPRCORE_PERFECT_HASH_H
 
+#include <ConstexprCore/perfect_hash_version.h>
 #include <ConstexprCore/fixed_string.h>
 #include <ConstexprCore/detail/gperf_generator.h>
 #include <array>

@@ -1,0 +1,7 @@
+@PACKAGE_INIT@
+
+# perfect_hash installs the amalgamated, self-contained header, so the
+# imported target has no dependencies of its own.
+include("${CMAKE_CURRENT_LIST_DIR}/perfect_hashTargets.cmake")
+
+check_required_components(perfect_hash)

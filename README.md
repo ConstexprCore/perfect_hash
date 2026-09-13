@@ -136,6 +136,121 @@ The [PR review measurements](docs/pr30_review.md) record the retained compile-ti
 improvement, correctness fixes, rejected optimization, and local validation.
 
 
+## Installing it
+
+Three ways, in increasing order of build-system involvement. All of them give
+you the same `#include` and the same code.
+
+### Drop in one header (no build system, no dependencies)
+
+`singleheader/perfect_hash.h` is a self-contained amalgamation — the library
+plus the `fixed_string.h` dependency, in one file. Grab it and compile:
+
+```bash
+curl -O https://raw.githubusercontent.com/ConstexprCore/perfect_hash/v0.2.0/singleheader/perfect_hash.h
+```
+
+or, from the release assets:
+
+```bash
+curl -LO https://github.com/ConstexprCore/perfect_hash/releases/download/v0.2.0/perfect_hash.h
+```
+
+Then just include it:
+
+```cpp
+#include "perfect_hash.h"
+
+constexpr auto methods = ConstexprCore::make_perfect_set<"GET", "POST", "PUT">();
+```
+
+```bash
+c++ -std=c++23 -O2 main.cpp -o main
+```
+
+Use `.../refs/heads/main/singleheader/perfect_hash.h` instead of a tag if you
+want the development version. To regenerate the file from a checkout:
+
+```bash
+python3 singleheader/amalgamate.py          # writes singleheader/perfect_hash.h
+python3 singleheader/amalgamate.py --test   # ...and compiles the demo against it
+python3 singleheader/amalgamate.py --check  # CI: fail if the checked-in copy is stale
+```
+
+The script walks the include graph from `include/ConstexprCore/perfect_hash.h`,
+splices each project header in where it is included — in place, so the SIMD
+helpers stay behind their `#if` guards — and leaves system includes alone. A
+CMake build also produces `build/singleheader/perfect_hash.h` via the
+`perfect_hash_singleheader` target, and `perfect_hash_singleheader_update`
+refreshes the copy in the source tree.
+
+## Using it as a CMake dependency
+
+### FetchContent
+
+Nothing else to declare: the `useful_abstractions` dependency is fetched for
+you, and tests, benchmarks and examples switch themselves off when perfect_hash
+is not the top-level project.
+
+```cmake
+include(FetchContent)
+FetchContent_Declare(
+    perfect_hash
+    GIT_REPOSITORY https://github.com/ConstexprCore/perfect_hash.git
+    GIT_TAG        v0.2.0
+)
+FetchContent_MakeAvailable(perfect_hash)
+
+add_executable(my_app main.cpp)
+target_link_libraries(my_app PRIVATE ConstexprCore::perfect_hash)
+target_compile_features(my_app PRIVATE cxx_std_23)
+```
+
+`add_subdirectory(perfect_hash)` on a vendored checkout works the same way.
+
+### find_package
+
+Install the project once:
+
+```bash
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr/local
+cmake --build build
+cmake --install build
+```
+
+then consume it from anywhere:
+
+```cmake
+find_package(perfect_hash 0.2 REQUIRED)
+
+add_executable(my_app main.cpp)
+target_link_libraries(my_app PRIVATE ConstexprCore::perfect_hash)
+```
+
+What gets installed is the *amalgamated* header, placed at the same include
+path the sources use, so an installed copy pulls in no dependency of its own:
+
+```cpp
+#include <ConstexprCore/perfect_hash.h>   // works from source and from an install
+#include <perfect_hash.h>                 // also installed, for drop-in style
+```
+
+Add `-DCMAKE_PREFIX_PATH=<prefix>` when you install somewhere CMake does not
+search by default. Pass `-DPH_INSTALL=OFF` to suppress the install rules when
+embedding the project in a larger build.
+
+### Verifying all three
+
+`tools/test_packaging.py` builds and runs a real consumer for each path — the
+drop-in header, FetchContent, and `find_package` against an install tree:
+
+```bash
+python3 tools/test_packaging.py
+python3 tools/test_packaging.py --only dropin
+```
+
+The consumer projects live in `tests/packaging/`.
+
 ## Building
 
 Requires a C++23 compiler and CMake 3.20+.
@@ -143,50 +258,31 @@ Requires a C++23 compiler and CMake 3.20+.
 ```bash
 cmake -B build
 cmake --build build
+ctest --test-dir build
 ```
 
-### Single-header bundle
+Options: `PH_BUILD_TESTS`, `PH_BUILD_BENCHMARKS`, `PH_BUILD_EXAMPLES` and
+`PH_INSTALL` all default to `ON` for a top-level build and `OFF` when the
+project is consumed from another CMake project.
 
-If Python 3 is available when you run CMake configure, the build exposes a
-target that bundles the library into a single distributable header.
+### Releasing
 
-Generate it with:
+`tools/release.py` bumps the version in `CMakeLists.txt`, the version header
+and the README download URLs, regenerates the amalgamation, commits and tags:
 
 ```bash
-cmake -S . -B build
-cmake --build build --target perfect_hash_singleheader
+python3 tools/release.py 0.2.0 --dry-run   # show what would change
+python3 tools/release.py 0.2.0             # write, commit, tag (does not push)
+python3 tools/release.py --minor           # or bump instead of naming a version
 ```
 
-The generated file is:
+It refuses to run off `main` or with modified tracked files, and prints the
+`git push` command rather than pushing for you.
 
-```text
-build/singleheader/perfect_hash.h
-```
-
-You can then ship that file directly and include it as:
-
-```cpp
-#include "perfect_hash.h"
-```
-
-The single header contains, in order:
-
-- `fixed_string.h`
-- `detail/gperf_generator.h`
-- `detail/neon_compare.h`
-- `detail/sse2_compare.h`
-- `perfect_hash.h`
-
-During bundling, the corresponding internal `#include <ConstexprCore/...>` lines
-inside `perfect_hash.h` are commented out so the generated file is self-contained.
-
-If the `perfect_hash_singleheader` target does not exist, re-run configure after
-installing Python 3 so CMake can detect it:
-
-```bash
-cmake -S . -B build
-cmake --build build --target perfect_hash_singleheader
-```
+To cut a release from CI instead, run the **Release** workflow from the Actions
+tab (or `gh workflow run release.yml -f bump=minor`): it performs the same
+bump, verifies the header builds against the standard library alone, pushes,
+and publishes a GitHub release with `singleheader/perfect_hash.h` attached.
 
 A smoke test for the generated header is also included in the test suite and can
 be run with:

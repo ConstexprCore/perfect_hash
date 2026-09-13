@@ -81,3 +81,36 @@ jobs:
       # ── Test ──────────────────────────────────────────────────────────────
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
+
+  singleheader:
+    name: Single-header amalgamation
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure git credentials
+        run: git config --global url."https://x-access-token:${{ secrets.USEFUL_ABSTRACTIONS_PAT }}@github.com/".insteadOf "https://github.com/"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install compiler
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y g++-14
+
+      # The release attaches the checked-in header, so it must never be stale.
+      - name: singleheader/perfect_hash.h is up to date
+        run: python3 singleheader/amalgamate.py --check --fetch
+
+      - name: It compiles against nothing but the standard library
+        env:
+          CXX: g++-14
+        run: python3 tools/test_packaging.py --only dropin
+
+      - name: It still works as a CMake dependency
+        env:
+          CC: gcc-14
+          CXX: g++-14
+        run: python3 tools/test_packaging.py --only fetchcontent find_package
