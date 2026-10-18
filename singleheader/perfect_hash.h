@@ -1,4 +1,4 @@
-/* auto-generated on 2026-10-17 22:04:38 -0700. Do not edit! */
+/* auto-generated on 2026-10-17 22:35:53 -0700. Do not edit! */
 /*
  * ConstexprCore perfect_hash 0.2.0 — single-header amalgamation.
  *
@@ -1545,6 +1545,14 @@ consteval phf_result<N> compute_phf(const std::array<std::string_view, N>& keys)
 
 namespace ConstexprCore::detail {
 
+// The page-safe loads read past short keys on purpose (see page_safe_load_16),
+// which GCC reports as out-of-bounds reads once it can see the key's object.
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Warray-bounds"
+#pragma GCC diagnostic ignored "-Wstringop-overread"
+#endif
+
 // TBL index masks: bytes at index >= len are set to 0x80 (TBL maps to 0).
 // Shared by neon_compare_8, neon_compare_16, and neon_compare_32.
 inline constexpr std::uint8_t tbl_masks[17][16] = {
@@ -1688,6 +1696,10 @@ constexprcore_really_inline bool neon_compare_32(const char* p, std::size_t len,
     uint8x8_t narrowed = vshrn_n_u16(vreinterpretq_u16_u8(combined), 4);
     return vget_lane_u64(vreinterpret_u64_u8(narrowed), 0) == ~0ULL;
 }
+
+#if defined(__GNUC__) && !defined(__clang__)
+#pragma GCC diagnostic pop
+#endif
 
 } // namespace ConstexprCore::detail
 
