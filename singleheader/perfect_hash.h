@@ -1,4 +1,4 @@
-/* auto-generated on 2026-09-13 21:47:54 +0000. Do not edit! */
+/* auto-generated on 2026-10-17 22:04:38 -0700. Do not edit! */
 /*
  * ConstexprCore perfect_hash 0.2.0 — single-header amalgamation.
  *
@@ -1567,8 +1567,8 @@ inline constexpr std::uint8_t tbl_masks[17][16] = {
     {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
 };
 
-// Page-safe 16-byte load helper. Returns raw NEON vector from p.
-// Falls back to byte-by-byte copy for addresses near page boundaries.
+// Page-safe 16-byte load helper. Bytes [0, len) of the result are p[0, len);
+// the remaining bytes are unspecified, and every caller masks them off.
 CONSTEXPRCORE_NO_SANITIZE_ADDRESS constexprcore_really_inline uint8x16_t page_safe_load_16(const char* p, std::size_t len) noexcept {
     uintptr_t addr = reinterpret_cast<uintptr_t>(p);
     // The page size can be as low as 4KB, so check the lower 12 bits for safety.
@@ -1576,13 +1576,23 @@ CONSTEXPRCORE_NO_SANITIZE_ADDRESS constexprcore_really_inline uint8x16_t page_sa
     // On Apple Silicon, the page size is 16KB, but it could change in the future.
     // Apple could decide to go back to 4KB pages. Or whatever. What we can
     // expect however is that nobody will go down under 4KB pages, so checking the lower 12 bits is a safe bet.
-    if ((addr & 4095) <= 4080) [[likely]] {
+    const std::size_t off = addr & 4095;
+    if (off <= 4080) [[likely]] {
         return vld1q_u8(reinterpret_cast<const uint8_t*>(p));
     }
-    alignas(16) std::uint8_t buf[16] = {};
-    for (std::size_t j = 0; j < len; j++)
-        buf[j] = static_cast<std::uint8_t>(p[j]);
-    return vld1q_u8(buf);
+    // A 16-byte load at p would cross into the next 4KB block, which may not
+    // be mapped. Load the last 16 bytes of this block instead, o bytes before
+    // p, and shift them down by o with one TBL: tbl_masks[16] is the identity
+    // row 0..15, and indices pushed past 15 read as zero. A key that itself
+    // crosses into the next block proves that block is mapped, so o = 0.
+    // Keep this path free of calls. The byte-copy loop it replaces compiled
+    // to bzero + memcpy, and having those calls in the caller's lookup loop,
+    // even never taken, made clang rebuild loop-invariant constants on every
+    // iteration.
+    const std::size_t o = off > 4096 - len ? 0 : off - 4080;
+    const uint8x16_t raw = vld1q_u8(reinterpret_cast<const uint8_t*>(addr - o));
+    const uint8x16_t idx = vaddq_u8(vld1q_u8(tbl_masks[16]), vdupq_n_u8(static_cast<std::uint8_t>(o)));
+    return vqtbl1q_u8(raw, idx);
 }
 
 // NEON 16-byte key comparison using TBL masking + vceqq.

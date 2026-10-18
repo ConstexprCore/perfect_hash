@@ -18,6 +18,7 @@ add_executable(phf_tests
     test_benchmark_inputs.cpp
     test_simd_review.cpp
     test_classic_review.cpp
+    test_page_edges.cpp
 )
 
 target_link_libraries(phf_tests PRIVATE
