@@ -154,7 +154,7 @@ you the same `#include` and the same code.
 plus the `fixed_string.h` dependency, in one file. Grab it and compile:
 
 ```bash
-curl -LO https://github.com/ConstexprCore/perfect_hash/releases/download/v0.2.0/perfect_hash.h
+curl -LO https://github.com/ConstexprCore/perfect_hash/releases/download/v0.3.0/perfect_hash.h
 ```
 
 Then just include it:
