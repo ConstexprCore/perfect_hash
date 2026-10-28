@@ -17,7 +17,9 @@
 #endif
 #endif // CONSTEXPRCORE_NO_SANITIZE_ADDRESS
 
-#if (defined(__x86_64__) || defined(_M_X64)) && !defined(CONSTEXPRCORE_NO_SSE2)
+// Fil-C (memory-safe C/C++) traps the page-safe overread past the end of a
+// key, so it gets the scalar path, which never reads past len.
+#if (defined(__x86_64__) || defined(_M_X64)) && !defined(CONSTEXPRCORE_NO_SSE2) && !defined(__FILC__)
 #include <emmintrin.h>
 #include <cstdint>
 #include <cstddef>

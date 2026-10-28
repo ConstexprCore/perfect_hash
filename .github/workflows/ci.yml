@@ -82,6 +82,45 @@ jobs:
       - name: Test
         run: ctest --test-dir build -C Release --output-on-failure
 
+  # ── Fil-C · Linux x86-64 (memory-safe C++, scalar path) ───────────────────
+  # Fil-C panics on any out-of-bounds access, so this job checks that the
+  # library never reads past a key when the SIMD paths are compiled out.
+  filc:
+    name: Fil-C · Linux
+    runs-on: ubuntu-24.04
+    env:
+      FILC_VERSION: "0.687"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure git credentials
+        run: git config --global url."https://x-access-token:${{ secrets.USEFUL_ABSTRACTIONS_PAT }}@github.com/".insteadOf "https://github.com/"
+
+      - name: Install Fil-C
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y patchelf
+          curl -sSfL -o "$RUNNER_TEMP/filc.tar.xz" \
+            "https://github.com/pizlonator/fil-c/releases/download/v${FILC_VERSION}/filc-${FILC_VERSION}-linux-x86_64.tar.xz"
+          tar xf "$RUNNER_TEMP/filc.tar.xz" -C "$RUNNER_TEMP"
+          cd "$RUNNER_TEMP/filc-${FILC_VERSION}-linux-x86_64"
+          ./setup.sh
+          echo "FILC_BIN=$PWD/build/bin" >> "$GITHUB_ENV"
+
+      - name: Configure
+        run: |
+          cmake -B build \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_C_COMPILER="$FILC_BIN/filcc" \
+            -DCMAKE_CXX_COMPILER="$FILC_BIN/fil++" \
+            -DPH_BUILD_BENCHMARKS=OFF
+
+      - name: Build
+        run: cmake --build build -j 4
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
   singleheader:
     name: Single-header amalgamation
     runs-on: ubuntu-24.04

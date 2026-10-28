@@ -18,7 +18,9 @@
 #endif
 #endif // CONSTEXPRCORE_NO_SANITIZE_ADDRESS
 
-#if defined(__aarch64__) && !defined(CONSTEXPRCORE_NO_NEON)
+// Fil-C (memory-safe C/C++) traps the page-safe overread past the end of a
+// key, so it gets the scalar path, which never reads past len.
+#if defined(__aarch64__) && !defined(CONSTEXPRCORE_NO_NEON) && !defined(__FILC__)
 #include <arm_neon.h>
 #include <cstdint>
 #include <cstddef>
