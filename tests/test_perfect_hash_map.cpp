@@ -5,7 +5,7 @@
 TEST_SUITE("perfect_hash_map") {
 
     TEST_CASE("construction and size") {
-        constexpr auto status_map = ConstexprCore::make_perfect_map<
+        static constexpr auto status_map = ConstexprCore::make_perfect_map<
             ConstexprCore::kv<"OK", 200>,
             ConstexprCore::kv<"Not Found", 404>,
             ConstexprCore::kv<"Internal Server Error", 500>
@@ -15,7 +15,7 @@ TEST_SUITE("perfect_hash_map") {
     }
 
     TEST_CASE("lookup positive") {
-        constexpr auto status_map = ConstexprCore::make_perfect_map<
+        static constexpr auto status_map = ConstexprCore::make_perfect_map<
             ConstexprCore::kv<"OK", 200>,
             ConstexprCore::kv<"Not Found", 404>,
             ConstexprCore::kv<"Internal Server Error", 500>
@@ -29,7 +29,7 @@ TEST_SUITE("perfect_hash_map") {
     }
 
     TEST_CASE("lookup negative") {
-        constexpr auto status_map = ConstexprCore::make_perfect_map<
+        static constexpr auto status_map = ConstexprCore::make_perfect_map<
             ConstexprCore::kv<"OK", 200>,
             ConstexprCore::kv<"Not Found", 404>
         >();
@@ -40,7 +40,7 @@ TEST_SUITE("perfect_hash_map") {
     }
 
     TEST_CASE("contains") {
-        constexpr auto status_map = ConstexprCore::make_perfect_map<
+        static constexpr auto status_map = ConstexprCore::make_perfect_map<
             ConstexprCore::kv<"OK", 200>,
             ConstexprCore::kv<"Not Found", 404>
         >();
