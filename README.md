@@ -19,6 +19,7 @@ Compile-time perfect hashing for C++. Build zero-collision hash sets and maps en
       + [find_package](#find-package)
       + [Verifying all three](#verifying-all-three)
    * [Building](#building)
+      + [Fil-C](#fil-c)
       + [Precompiled headers (PCH) for faster compiles](#precompiled-headers-pch-for-faster-compiles)
       + [Tests](#tests)
       + [Benchmarks](#benchmarks)
@@ -271,6 +272,13 @@ be run with:
 ```bash
 ctest --test-dir build --output-on-failure -R phf_singleheader_smoke
 ```
+
+### Fil-C
+
+The library and its tests build and pass under [Fil-C](https://fil-c.org/), the
+memory-safe C/C++ compiler (`-DCMAKE_CXX_COMPILER=fil++`). Fil-C gets the scalar
+path automatically: the SIMD paths read a few bytes past the end of short keys
+(never across a page boundary), which Fil-C reports as out of bounds.
 
 ### Precompiled headers (PCH) for faster compiles
 

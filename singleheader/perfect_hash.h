@@ -1,4 +1,4 @@
-/* auto-generated on 2026-10-28 18:10:33 -0400. Do not edit! */
+/* auto-generated on 2026-10-28 18:24:55 -0400. Do not edit! */
 /*
  * ConstexprCore perfect_hash 0.3.0 — single-header amalgamation.
  *
@@ -1536,7 +1536,9 @@ consteval phf_result<N> compute_phf(const std::array<std::string_view, N>& keys)
 #endif
 #endif // CONSTEXPRCORE_NO_SANITIZE_ADDRESS
 
-#if defined(__aarch64__) && !defined(CONSTEXPRCORE_NO_NEON)
+// Fil-C (memory-safe C/C++) traps the page-safe overread past the end of a
+// key, so it gets the scalar path, which never reads past len.
+#if defined(__aarch64__) && !defined(CONSTEXPRCORE_NO_NEON) && !defined(__FILC__)
 #include <arm_neon.h>
 #include <cstdint>
 #include <cstddef>
@@ -1726,7 +1728,9 @@ constexprcore_really_inline bool neon_compare_32(const char* p, std::size_t len,
 #endif
 #endif // CONSTEXPRCORE_NO_SANITIZE_ADDRESS
 
-#if (defined(__x86_64__) || defined(_M_X64)) && !defined(CONSTEXPRCORE_NO_SSE2)
+// Fil-C (memory-safe C/C++) traps the page-safe overread past the end of a
+// key, so it gets the scalar path, which never reads past len.
+#if (defined(__x86_64__) || defined(_M_X64)) && !defined(CONSTEXPRCORE_NO_SSE2) && !defined(__FILC__)
 #include <emmintrin.h>
 #include <cstdint>
 #include <cstddef>
