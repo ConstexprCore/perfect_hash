@@ -1,4 +1,4 @@
-/* auto-generated on 2026-10-26 18:33:42 +0000. Do not edit! */
+/* auto-generated on 2026-10-28 18:10:33 -0400. Do not edit! */
 /*
  * ConstexprCore perfect_hash 0.3.0 — single-header amalgamation.
  *
@@ -1762,25 +1762,13 @@ inline constexpr std::uint8_t and_masks[17][16] = {
     {0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF,0xFF},
 };
 
-// Read an address range that the caller has established is mapped. The
-// explicit machine load keeps the page-safe overread out of C++ vector-load
-// folding, including when LTO later discovers a short input object. The
-// memory operand describes exactly the bytes read, without a memory clobber.
+// Read an address range that the caller has established is mapped. Known
+// short objects never reach this load (the __builtin_object_size guards in
+// page_safe_load_16 and compare_chunks copy them first), and windows past the
+// first chunk are formed by integer arithmetic (sse2_mapped_offset), so the
+// optimizer cannot fold the overread, even under LTO.
 constexprcore_really_inline __m128i sse2_load_mapped_16(const char* p) noexcept {
-#if defined(__GNUC__) || defined(__clang__)
-    using bytes16 = char[16];
-    __m128i raw;
-#if defined(__AVX__)
-    __asm__("vmovdqu {%1, %0|%0, %1}" : "=x"(raw)
-            : "m"(*reinterpret_cast<const bytes16*>(p)));
-#else
-    __asm__("movdqu {%1, %0|%0, %1}" : "=x"(raw)
-            : "m"(*reinterpret_cast<const bytes16*>(p)));
-#endif
-    return raw;
-#else
     return _mm_loadu_si128(reinterpret_cast<const __m128i*>(p));
-#endif
 }
 
 // Page-safe 16-byte load helper for x86-64.
