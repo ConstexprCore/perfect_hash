@@ -13,6 +13,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <type_traits>
 #ifndef constexprcore_really_inline
 #if defined(_MSC_VER) && !defined(__clang__)
 #define constexprcore_really_inline __forceinline
@@ -308,7 +309,7 @@ struct perfect_hash_set {
 
     // Portable copy helper: constexpr-friendly byte loop, std::memcpy at runtime.
     static constexpr void copy_bytes_(void* dst, const void* src, std::size_t n) noexcept {
-        if consteval {
+        if (std::is_constant_evaluated()) {
             auto* d = static_cast<unsigned char*>(dst);
             const auto* s = static_cast<const unsigned char*>(src);
             for (std::size_t i = 0; i < n; ++i) d[i] = s[i];
@@ -363,7 +364,7 @@ struct perfect_hash_set {
         // No byte needs comparing for an empty key; data() may be null.
         // Callers check the stored length separately.
         if (len == 0) return true;
-        if consteval {
+        if (std::is_constant_evaluated()) {
             // consteval: byte-by-byte (no intrinsics)
             const char* a = slot_key_data_[slot].data();
             for (std::size_t i = 0; i < len; ++i)
@@ -414,7 +415,7 @@ struct perfect_hash_set {
 #elif defined(__clang__)
                 // Scalar fallback: two packed uint64 words, fully branchless.
                 std::uint64_t input_val;
-                if consteval {
+                if (std::is_constant_evaluated()) {
                     input_val = pack_input_(p, len);
                 } else {
                     if (min_key_len_ >= 8) {
@@ -448,7 +449,7 @@ struct perfect_hash_set {
 #elif defined(__clang__)
                 // Scalar fallback: first 8 bytes packed, then byte loop.
                 std::uint64_t input_val;
-                if consteval {
+                if (std::is_constant_evaluated()) {
                     input_val = pack_input_(p, len);
                 } else {
                     if (min_key_len_ >= 8) {
@@ -476,7 +477,7 @@ struct perfect_hash_set {
 #elif defined(__clang__)
                 // MaxKeyLen > 32: first 8 bytes packed, then byte loop.
                 std::uint64_t input_val;
-                if consteval {
+                if (std::is_constant_evaluated()) {
                     input_val = pack_input_(p, len);
                 } else {
                     if (min_key_len_ >= 8) {

@@ -166,7 +166,7 @@ constexpr auto methods = ConstexprCore::make_perfect_set<"GET", "POST", "PUT">()
 ```
 
 ```bash
-c++ -std=c++23 -O2 main.cpp -o main
+c++ -std=c++20 -O2 main.cpp -o main
 ```
 
 To regenerate the file from a checkout:
@@ -203,7 +203,7 @@ FetchContent_MakeAvailable(perfect_hash)
 
 add_executable(my_app main.cpp)
 target_link_libraries(my_app PRIVATE ConstexprCore::perfect_hash)
-target_compile_features(my_app PRIVATE cxx_std_23)
+target_compile_features(my_app PRIVATE cxx_std_20)
 ```
 
 `add_subdirectory(perfect_hash)` on a vendored checkout works the same way.
@@ -253,7 +253,7 @@ The consumer projects live in `tests/packaging/`.
 
 ## Building
 
-Requires a C++23 compiler and CMake 3.20+.
+Requires a C++20 compiler and CMake 3.20+.
 
 ```bash
 cmake -B build
@@ -369,8 +369,8 @@ times will be fast.
 Using GCC from the command line:
 
 ```bash
-g++ -std=c++23 -O2 -x c++-header fun.h -o fun.h.gch
-g++ -std=c++23 -O2 fun.cpp -o fun
+g++ -std=c++20 -O2 -x c++-header fun.h -o fun.h.gch
+g++ -std=c++20 -O2 fun.cpp -o fun
 ```
 
 
@@ -381,7 +381,7 @@ add_executable(fun_demo fun.cpp)
 target_precompile_headers(fun_demo PRIVATE
         "${CMAKE_CURRENT_SOURCE_DIR}/fun.h"
 )
-target_compile_features(fun_demo PRIVATE cxx_std_23)
+target_compile_features(fun_demo PRIVATE cxx_std_20)
 ```
 
 Then build as usual:
