@@ -35,6 +35,10 @@ FetchContent_Declare(
 )
 FetchContent_MakeAvailable(useful_abstractions)
 
+# useful_abstractions asks for cxx_std_23, which would build everything that
+# links this library as C++23. Its headers are valid C++20.
+set_target_properties(useful_abstractions PROPERTIES INTERFACE_COMPILE_FEATURES cxx_std_20)
+
 find_package(Python3 COMPONENTS Interpreter QUIET)
 
 # ---------------------------------------------------------------------------
