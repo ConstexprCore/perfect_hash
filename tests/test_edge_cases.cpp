@@ -4,7 +4,7 @@
 TEST_SUITE("edge_cases") {
 
     TEST_CASE("prefix strings") {
-        constexpr auto prefix_set = ConstexprCore::make_perfect_set<"a", "ab", "abc", "abcd">();
+        static constexpr auto prefix_set = ConstexprCore::make_perfect_set<"a", "ab", "abc", "abcd">();
         static_assert(prefix_set.contains("a"));
         static_assert(prefix_set.contains("ab"));
         static_assert(prefix_set.contains("abc"));
@@ -22,7 +22,7 @@ TEST_SUITE("edge_cases") {
     }
 
     TEST_CASE("similar strings") {
-        constexpr auto similar_set = ConstexprCore::make_perfect_set<
+        static constexpr auto similar_set = ConstexprCore::make_perfect_set<
             "foo", "fop", "foq", "goo", "boo"
         >();
         static_assert(similar_set.contains("foo"));
@@ -42,7 +42,7 @@ TEST_SUITE("edge_cases") {
     }
 
     TEST_CASE("26 single-char strings") {
-        constexpr auto letters = ConstexprCore::make_perfect_set<
+        static constexpr auto letters = ConstexprCore::make_perfect_set<
             "a", "b", "c", "d", "e", "f", "g", "h", "i", "j",
             "k", "l", "m", "n", "o", "p", "q", "r", "s", "t",
             "u", "v", "w", "x", "y", "z"
@@ -64,7 +64,7 @@ TEST_SUITE("edge_cases") {
     }
 
     TEST_CASE("single-char strings small set") {
-        constexpr auto xyz_set = ConstexprCore::make_perfect_set<"x", "y", "z">();
+        static constexpr auto xyz_set = ConstexprCore::make_perfect_set<"x", "y", "z">();
         static_assert(xyz_set.contains("x"));
         static_assert(xyz_set.contains("y"));
         static_assert(xyz_set.contains("z"));
@@ -79,7 +79,7 @@ TEST_SUITE("edge_cases") {
     }
 
     TEST_CASE("two element set") {
-        constexpr auto bool_set = ConstexprCore::make_perfect_set<"true", "false">();
+        static constexpr auto bool_set = ConstexprCore::make_perfect_set<"true", "false">();
         static_assert(bool_set.size() == 2);
         static_assert(bool_set.contains("true"));
         static_assert(bool_set.contains("false"));
@@ -97,7 +97,7 @@ TEST_SUITE("edge_cases") {
     TEST_CASE("all same length - position-only discrimination") {
         // 5 three-letter keys with all-distinct first chars.
         // Length can't help (all length 3), forces position selection.
-        constexpr auto animals_set = ConstexprCore::make_perfect_set<
+        static constexpr auto animals_set = ConstexprCore::make_perfect_set<
             "cat", "dog", "bat", "rat", "hat"
         >();
         static_assert(animals_set.size() == 5);
@@ -116,7 +116,7 @@ TEST_SUITE("edge_cases") {
 
     TEST_CASE("differ only at last char") {
         // All share prefix "ab", differ only in final character
-        constexpr auto lastchar_set = ConstexprCore::make_perfect_set<
+        static constexpr auto lastchar_set = ConstexprCore::make_perfect_set<
             "abp", "abq", "abr", "abs", "abt"
         >();
         static_assert(lastchar_set.size() == 5);
@@ -131,7 +131,7 @@ TEST_SUITE("edge_cases") {
     }
 
     TEST_CASE("differ only at first char") {
-        constexpr auto firstchar_set = ConstexprCore::make_perfect_set<
+        static constexpr auto firstchar_set = ConstexprCore::make_perfect_set<
             "a_end", "b_end", "c_end", "d_end", "e_end"
         >();
         static_assert(firstchar_set.size() == 5);
@@ -145,7 +145,7 @@ TEST_SUITE("edge_cases") {
 
     TEST_CASE("interior position only differs") {
         // All 3 chars, same first and last, differ only at position 1
-        constexpr auto interior_set = ConstexprCore::make_perfect_set<
+        static constexpr auto interior_set = ConstexprCore::make_perfect_set<
             "xax", "xbx", "xcx", "xdx"
         >();
         static_assert(interior_set.size() == 4);
@@ -161,7 +161,7 @@ TEST_SUITE("edge_cases") {
     TEST_CASE("needs two positions - strategy 3 catches") {
         // No single position distinguishes all pairs (pos0: {a,b}, pos1: {x,y}).
         // Strategy 3 {0, LAST_CHAR} works since LAST_CHAR == pos1 for 2-char keys.
-        constexpr auto twopos_set = ConstexprCore::make_perfect_set<
+        static constexpr auto twopos_set = ConstexprCore::make_perfect_set<
             "ax", "ay", "bx", "by"
         >();
         static_assert(twopos_set.size() == 4);
@@ -183,7 +183,7 @@ TEST_SUITE("edge_cases") {
         //   - No single position has all-distinct chars → strategy 2 fails
         //   - {0, LAST_CHAR}={0,2}: (cat,cot) share pos0='c' AND last='t' → strategy 3 fails
         //   - Backtracking finds {0, 1}: pos0 splits {c,b} groups, pos1 splits within
-        constexpr auto backtrack_set = ConstexprCore::make_perfect_set<
+        static constexpr auto backtrack_set = ConstexprCore::make_perfect_set<
             "cat", "cot", "bat", "bot"
         >();
         static_assert(backtrack_set.size() == 4);
@@ -205,7 +205,7 @@ TEST_SUITE("edge_cases") {
     TEST_CASE("backtracking with 5 keys") {
         // Same pattern: pos0={x,x,x,y,y}, LAST={p,p,p,q,q}
         // {0, LAST_CHAR} fails for pairs like (xap, xbp). Needs {0,1} or {1,LAST}.
-        constexpr auto backtrack5_set = ConstexprCore::make_perfect_set<
+        static constexpr auto backtrack5_set = ConstexprCore::make_perfect_set<
             "xap", "xbp", "xcp", "yaq", "ybq"
         >();
         static_assert(backtrack5_set.size() == 5);
@@ -221,7 +221,7 @@ TEST_SUITE("edge_cases") {
     TEST_CASE("mixed lengths with shared characters") {
         // Varying lengths ensure some pairs are separated by length alone,
         // while same-length pairs still need position coverage.
-        constexpr auto mixedlen_set = ConstexprCore::make_perfect_set<
+        static constexpr auto mixedlen_set = ConstexprCore::make_perfect_set<
             "a", "ab", "ba", "abc", "bca"
         >();
         static_assert(mixedlen_set.size() == 5);
@@ -240,7 +240,7 @@ TEST_SUITE("edge_cases") {
     }
 
     TEST_CASE("non-minimal table size (M > N)") {
-        constexpr ConstexprCore::perfect_hash_set<3, 5, 5> non_min{
+        static constexpr ConstexprCore::perfect_hash_set<3, 5, 5> non_min{
             std::array<std::string_view, 3>{"alpha", "beta", "gamma"}
         };
         static_assert(non_min.size() == 3);
@@ -261,11 +261,11 @@ TEST_SUITE("edge_cases") {
     }
 
     TEST_CASE("table_size() accessor") {
-        constexpr auto set3 = ConstexprCore::make_perfect_set<"one", "two", "three">();
+        static constexpr auto set3 = ConstexprCore::make_perfect_set<"one", "two", "three">();
         static_assert(set3.size() == 3);
         static_assert(set3.table_size() >= set3.size());
 
-        constexpr auto map2 = ConstexprCore::make_perfect_map<
+        static constexpr auto map2 = ConstexprCore::make_perfect_map<
             ConstexprCore::kv<"a", 1>,
             ConstexprCore::kv<"b", 2>
         >();
@@ -276,7 +276,7 @@ TEST_SUITE("edge_cases") {
     }
 
     TEST_CASE("large key set - 15 C++ keywords") {
-        constexpr auto keywords = ConstexprCore::make_perfect_set<
+        static constexpr auto keywords = ConstexprCore::make_perfect_set<
             "auto", "bool", "break", "case", "char",
             "class", "const", "do", "double", "else",
             "enum", "float", "for", "goto", "if"
@@ -298,7 +298,7 @@ TEST_SUITE("edge_cases") {
     }
 
     TEST_CASE("long keys (>16 chars, exercising MAX_POSITIONS cap)") {
-        constexpr auto long_keys = ConstexprCore::make_perfect_set<
+        static constexpr auto long_keys = ConstexprCore::make_perfect_set<
             "authentication_service",
             "database_connection_pool",
             "distributed_lock_manager",
@@ -320,7 +320,7 @@ TEST_SUITE("edge_cases") {
     }
 
     TEST_CASE("empty string as key") {
-        constexpr auto set = ConstexprCore::make_perfect_set<"", "a", "ab">();
+        static constexpr auto set = ConstexprCore::make_perfect_set<"", "a", "ab">();
         static_assert(set.contains(""));
         static_assert(set.contains("a"));
         static_assert(set.contains("ab"));
@@ -332,7 +332,7 @@ TEST_SUITE("edge_cases") {
     }
 
     TEST_CASE("map with same-length keys") {
-        constexpr auto weekday_map = ConstexprCore::make_perfect_map<
+        static constexpr auto weekday_map = ConstexprCore::make_perfect_map<
             ConstexprCore::kv<"mon", 1>,
             ConstexprCore::kv<"tue", 2>,
             ConstexprCore::kv<"wed", 3>,
@@ -350,7 +350,7 @@ TEST_SUITE("edge_cases") {
 
     // Issue #12: overlap encoding correctness for keys sharing first/last 2 bytes
     TEST_CASE("overlap encoding: middle bytes differ (len > 4)") {
-        constexpr auto set = ConstexprCore::make_perfect_set<
+        static constexpr auto set = ConstexprCore::make_perfect_set<
             "abXcd", "abYcd", "abZcd">();
         static_assert(set.contains("abXcd"));
         static_assert(set.contains("abYcd"));
@@ -366,7 +366,7 @@ TEST_SUITE("edge_cases") {
 
     // Issue #13: H&D generator with larger key set (N > 15)
     TEST_CASE("H&D mode: 20 stock tickers") {
-        constexpr auto set = ConstexprCore::make_perfect_set<
+        static constexpr auto set = ConstexprCore::make_perfect_set<
             "AAPL","AMD","AMZN","BA","C","COST","CVX","DIS","F","GE",
             "GOOG","GS","HD","IBM","JPM","MA","META","MSFT","NVDA","TSLA">();
         static_assert(set.size() == 20);
@@ -389,7 +389,7 @@ TEST_SUITE("edge_cases") {
     // Issue #14: H&D with adversarial keys that stress bucket displacement.
     // All keys are 2 chars with shared prefixes — large buckets.
     TEST_CASE("H&D mode: 25 similar 2-char keys") {
-        constexpr auto set = ConstexprCore::make_perfect_set<
+        static constexpr auto set = ConstexprCore::make_perfect_set<
             "AA","AB","AC","AD","AE","AF","AG","AH","AI","AJ",
             "BA","BB","BC","BD","BE","BF","BG","BH","BI","BJ",
             "CA","CB","CC","CD","CE">();
