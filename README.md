@@ -264,7 +264,10 @@ ctest --test-dir build
 
 Options: `PH_BUILD_TESTS`, `PH_BUILD_BENCHMARKS`, `PH_BUILD_EXAMPLES` and
 `PH_INSTALL` all default to `ON` for a top-level build and `OFF` when the
-project is consumed from another CMake project.
+project is consumed from another CMake project. The examples use C++26
+reflection: CMake checks whether the compiler supports it (currently GCC 16 with
+`-freflection` or Bloomberg's P2996 Clang fork) and skips them otherwise, so
+there is no need to turn `PH_BUILD_EXAMPLES` off by hand.
 
 A smoke test for the generated header is also included in the test suite and can
 be run with:
