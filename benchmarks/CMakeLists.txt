@@ -8,7 +8,7 @@ FetchContent_MakeAvailable(counters)
 FetchContent_Declare(
     unordered_dense
     GIT_REPOSITORY https://github.com/martinus/unordered_dense.git
-    GIT_TAG v4.5.0
+    GIT_TAG v5.3.3
 )
 FetchContent_MakeAvailable(unordered_dense)
 

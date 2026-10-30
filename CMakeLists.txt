@@ -166,8 +166,9 @@ if(PH_INSTALL)
         DESTINATION "${CMAKE_INSTALL_LIBDIR}/cmake/perfect_hash")
 endif()
 
-# Examples (requires C++26 reflection support)
-option(PH_BUILD_EXAMPLES "Build examples (requires C++26 -freflection)" ${PROJECT_IS_TOP_LEVEL})
+# Examples (C++26 reflection). examples/reflect probes the compiler and skips
+# its targets when reflection is unavailable, so this can stay ON.
+option(PH_BUILD_EXAMPLES "Build the C++26 reflection examples if the compiler supports them" ${PROJECT_IS_TOP_LEVEL})
 if(PH_BUILD_EXAMPLES)
     add_subdirectory(examples/reflect)
 endif()
