@@ -97,7 +97,7 @@ def headline_numbers(body: str) -> list[tuple[str, str]]:
         (f"{ours} B/s" if ours else "1 B/s", "lookups per second, single core"),
         ("0", "collisions, by construction"),
         ("1", "header, no dependencies"),
-        ("C++23", "header-only, consteval"),
+        ("C++20", "header-only, consteval"),
     ]
     return stats
 

@@ -73,7 +73,7 @@ if(PH_SINGLEHEADER_AVAILABLE)
         "${PH_SINGLEHEADER_OUTPUT_DIR}"
     )
 
-    target_compile_features(phf_singleheader_smoke PRIVATE cxx_std_23)
+    target_compile_features(phf_singleheader_smoke PRIVATE cxx_std_20)
     target_compile_options(phf_singleheader_smoke PRIVATE
         $<$<CXX_COMPILER_ID:GNU,Clang,AppleClang>:-Wall -Wextra -Wpedantic>
         $<$<CXX_COMPILER_ID:GNU>:-fconstexpr-ops-limit=1000000000>

@@ -50,7 +50,7 @@ def test_dropin(workdir: Path) -> None:
     shutil.copy(PACKAGING_DIR / "dropin" / "main.cpp", workdir / "main.cpp")
     binary = workdir / "dropin_consumer"
     compiler = os.environ.get("CXX", "c++")
-    run([compiler, "-std=c++23", "-O2", "-Wall", "-Wextra", "-I", str(workdir),
+    run([compiler, "-std=c++20", "-O2", "-Wall", "-Wextra", "-I", str(workdir),
          str(workdir / "main.cpp"), "-o", str(binary)])
     run([str(binary)])
 
