@@ -19,6 +19,7 @@ add_executable(phf_tests
     test_simd_review.cpp
     test_classic_review.cpp
     test_page_edges.cpp
+    test_key_length.cpp
 )
 
 target_link_libraries(phf_tests PRIVATE

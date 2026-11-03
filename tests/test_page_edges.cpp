@@ -6,6 +6,7 @@
 #include <doctest/doctest.h>
 #include <ConstexprCore/perfect_hash.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstring>
@@ -37,7 +38,8 @@ TEST_CASE("16-byte chunk loads are exact at every offset around a 4 KB boundary"
 #if defined(__unix__) || defined(__APPLE__)
 namespace {
 
-// MaxKeyLen 5 and 16: the 8-byte and 16-byte compares.
+// MaxKeyLen 5, 15 and 16: the 8-byte compare, and the 16-byte compare with
+// and without the key length in byte 15.
 constexpr auto protocol_set = ConstexprCore::make_perfect_set<
     "http", "https", "ftp", "ws", "wss", "file">();
 constexpr auto header_set = ConstexprCore::make_perfect_set<
@@ -45,6 +47,11 @@ constexpr auto header_set = ConstexprCore::make_perfect_set<
     "Content-Encoding", "Content-Length", "Content-Type", "Cookie", "Date",
     "Host", "If-None-Match", "Location", "Origin", "Referer", "Server",
     "Set-Cookie", "User-Agent", "Vary", "Via">();
+constexpr auto header15_set = ConstexprCore::make_perfect_set<
+    "Accept", "Accept-Encoding", "Authorization", "Cache-Control", "Connection",
+    "Content-Length", "Content-Type", "Cookie", "Date", "Host",
+    "If-None-Match", "Location", "Origin", "Referer", "Server",
+    "Set-Cookie", "User-Agent", "Vary", "Via", "X-Forwarded-For">();
 
 template <typename Set>
 std::optional<std::size_t> expected_index(const Set& set, std::string_view probe) {
@@ -53,17 +60,20 @@ std::optional<std::size_t> expected_index(const Set& set, std::string_view probe
     return std::nullopt;
 }
 
-// Every prefix of every key, ending 0..16 bytes before `end`, and each of
-// those with one byte flipped. The probes that start in the last 15 bytes
-// of the block take the page-safe path.
+// Every prefix of every key, and every key followed by 1, 2 or 16 more
+// bytes, ending 0..16 bytes before `end`, and each of those with one byte
+// flipped. The probes that start in the last 15 bytes of the block take the
+// page-safe path.
 template <typename Set>
 void check_probes_before(const Set& set, char* end) {
     for (std::size_t k = 0; k < set.size(); ++k) {
         const std::string_view key = set.key_at(k);
-        for (std::size_t len = 1; len <= key.size(); ++len) {
+        auto check_len = [&](std::size_t len) {
             for (std::size_t gap = 0; gap <= 16; ++gap) {
                 char* p = end - gap - len;
-                std::memcpy(p, key.data(), len);
+                std::memcpy(p, key.data(), std::min(len, key.size()));
+                for (std::size_t i = key.size(); i < len; ++i)
+                    p[i] = static_cast<char>(i == key.size() ? 0 : key.size());
                 const std::string_view probe(p, len);
                 CAPTURE(probe);
                 CAPTURE(gap);
@@ -75,7 +85,9 @@ void check_probes_before(const Set& set, char* end) {
                     p[i] ^= 0x01;
                 }
             }
-        }
+        };
+        for (std::size_t len = 1; len <= key.size() + 2; ++len) check_len(len);
+        check_len(key.size() + 16);
     }
 }
 
@@ -97,5 +109,6 @@ TEST_CASE("classic lookups are exact for inputs that end at a protected page") {
     REQUIRE(mprotect(end, static_cast<std::size_t>(page_size), PROT_NONE) == 0);
     check_probes_before(protocol_set, end);
     check_probes_before(header_set, end);
+    check_probes_before(header15_set, end);
 }
 #endif
