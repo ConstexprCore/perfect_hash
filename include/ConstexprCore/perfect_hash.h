@@ -73,7 +73,7 @@ struct perfect_hash_set {
     static_assert(N <= 255, "N must be <= 255 for uint8_t key indices");
     static_assert(TableSize <= 256, "TableSize must be <= 256 (uint8_t slot array length)");
     static_assert(MaxKeyLen >= 1 && MaxKeyLen < 255,
-                  "MaxKeyLen must be in [1, 254] to reserve 0xFF as empty sentinel");
+                  "MaxKeyLen must be in [1, 254] (longer keys use the wide container)");
     static_assert(detail::MAX_POSITIONS <= 255, "MAX_POSITIONS must fit in uint8_t");
 
     static constexpr std::uint8_t POS_LAST_CHAR = 255;
@@ -93,7 +93,7 @@ struct perfect_hash_set {
     std::array<std::uint8_t, detail::MAX_POSITIONS> positions_{};
     std::uint8_t min_key_len_{};
     std::uint64_t hash_seed_{};   // FULLHASH_MODE only: seed of the whole-key hash
-    std::array<std::uint8_t, TableSize> slot_key_len_{};                    // key length (0xFF = empty)
+    std::array<std::uint8_t, TableSize> slot_key_len_{};                    // key length (0 if empty)
 #if CONSTEXPRCORE_HAS_NEON || CONSTEXPRCORE_HAS_SSE2 || CONSTEXPRCORE_HAS_LSX
     std::array<std::array<char, (MaxKeyLen + 15)/16 * 16>, TableSize> slot_key_data_{};    // inline key bytes
 #else
@@ -121,9 +121,12 @@ struct perfect_hash_set {
             if (keys[i].size() < mn) mn = keys[i].size();
         min_key_len_ = static_cast<std::uint8_t>(mn);
 
-        // Step 2: Populate inline key data and inverse mapping.
-        for (std::size_t s = 0; s < TableSize; ++s)
-            slot_key_len_[s] = 0xFF;
+        // Step 2: Populate inline key data and inverse mapping. An empty
+        // slot keeps length 0. An empty input never reaches one (it is
+        // rejected first, or it hashes to the slot of the empty key), and
+        // every other input is longer. A marker such as 0xFF would equal the
+        // length of a 255-byte input, which then matched an empty slot whose
+        // zero bytes it shared.
         for (std::size_t s = 0; s < TableSize; ++s) {
             if (slot_to_key_[s] < N) {
                 auto k = keys[slot_to_key_[s]];
@@ -762,7 +765,7 @@ inline constexpr std::array<ValueT, sizeof...(KVs)> kv_values_v{static_cast<Valu
 // Container choice. The wide container is selected only where the classic,
 // byte-indexed design cannot be used at all:
 //   N > 255           -> wide    (slot and position tables are byte-indexed)
-//   MaxKeyLen >= 255  -> wide    (the classic hash reserves byte length 255)
+//   MaxKeyLen >= 255  -> wide    (the classic container takes at most 254)
 //   everything else   -> classic
 //
 // An earlier revision also routed short-key sets (MaxKeyLen 2..7, N >= 8) to

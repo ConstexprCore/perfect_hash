@@ -204,6 +204,28 @@ TEST_CASE("wide map: 9-15 byte keys use two lanes with folded length") {
     }
 }
 
+// Empty slots once stored key length 0xFFFF, the length of a 65535-byte
+// input. One whose compared bytes were zero, like an empty slot's padding,
+// matched the empty slot it hashed to: this set has such a slot for the
+// input of 65535 zero bytes.
+inline constexpr std::array<std::string_view, 6> keys17 = {
+    "application/json5", "text/html-sandbox", "image/svg+xml-zzz",
+    "application/xml-q", "text/javascript-1", "font/woff2-sample"};
+static constexpr auto wide17 = make_wide_perfect_set<keys17>();
+
+TEST_CASE("wide: empty slots match no input, whatever its length") {
+    for (std::size_t len : {std::size_t{65534}, std::size_t{65535}, std::size_t{65536}}) {
+        for (int b = 0; b < 256; ++b) {
+            std::string input(len, '\0');
+            input[0] = static_cast<char>(b);
+            CAPTURE(len);
+            CAPTURE(b);
+            CHECK_FALSE(wide17.contains(input));
+            CHECK_FALSE(wide17.index_of(input).has_value());
+        }
+    }
+}
+
 // ---------------------------------------------------------------------------
 // wide set with long keys (chunk path) and the classic set with long keys
 // ---------------------------------------------------------------------------

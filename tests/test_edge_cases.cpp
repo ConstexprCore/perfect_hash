@@ -1,6 +1,9 @@
 #include <doctest/doctest.h>
 #include <ConstexprCore/perfect_hash.h>
 
+#include <cstddef>
+#include <string>
+
 TEST_SUITE("edge_cases") {
 
     TEST_CASE("prefix strings") {
@@ -402,6 +405,38 @@ TEST_SUITE("edge_cases") {
         CHECK(set.contains("CE"));
         CHECK_FALSE(set.contains("DA"));
         CHECK_FALSE(set.contains("AK"));
+    }
+
+    // Empty slots once stored key length 0xFF, the length of a 255-byte
+    // input. One whose compared bytes were zero, like an empty slot's
+    // padding, matched the empty slot it hashed to: both sets below have
+    // such a slot for the input of 255 zero bytes.
+    TEST_CASE("empty slots match no input, whatever its length") {
+        constexpr auto headers = ConstexprCore::make_perfect_map<
+            ConstexprCore::kv<"Accept", 0>, ConstexprCore::kv<"Accept-Encoding", 1>,
+            ConstexprCore::kv<"Authorization", 2>, ConstexprCore::kv<"Cache-Control", 3>,
+            ConstexprCore::kv<"Connection", 4>, ConstexprCore::kv<"Content-Length", 5>,
+            ConstexprCore::kv<"Content-Type", 6>, ConstexprCore::kv<"Cookie", 7>,
+            ConstexprCore::kv<"Date", 8>, ConstexprCore::kv<"Host", 9>,
+            ConstexprCore::kv<"If-None-Match", 10>, ConstexprCore::kv<"Location", 11>,
+            ConstexprCore::kv<"Origin", 12>, ConstexprCore::kv<"Referer", 13>,
+            ConstexprCore::kv<"Server", 14>, ConstexprCore::kv<"Set-Cookie", 15>,
+            ConstexprCore::kv<"User-Agent", 16>, ConstexprCore::kv<"Vary", 17>,
+            ConstexprCore::kv<"Via", 18>, ConstexprCore::kv<"X-Forwarded-For", 19>>();
+        constexpr auto mime = ConstexprCore::make_perfect_set<
+            "application/json", "text/html", "image/png", "text/css", "text/plain">();
+        for (std::size_t len : {std::size_t{254}, std::size_t{255}, std::size_t{256}}) {
+            for (int b = 0; b < 256; ++b) {
+                std::string input(len, '\0');
+                input[0] = static_cast<char>(b);
+                CAPTURE(len);
+                CAPTURE(b);
+                CHECK_FALSE(headers.lookup(input).has_value());
+                CHECK_FALSE(headers.contains(input));
+                CHECK_FALSE(mime.contains(input));
+                CHECK_FALSE(mime.index_of(input).has_value());
+            }
+        }
     }
 
 }
