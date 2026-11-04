@@ -3,7 +3,7 @@
 
 TEST_SUITE("url_protocols") {
 
-    constexpr auto protocols = ConstexprCore::make_perfect_set<
+    static constexpr auto protocols = ConstexprCore::make_perfect_set<
         "http:", "https:", "ftp:", "sftp:", "file:"
     >();
 

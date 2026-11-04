@@ -3,7 +3,7 @@
 
 TEST_SUITE("http_methods") {
 
-    constexpr auto methods = ConstexprCore::make_perfect_set<
+    static constexpr auto methods = ConstexprCore::make_perfect_set<
         "GET", "POST", "PUT", "DELETE", "PATCH", "HEAD", "OPTIONS"
     >();
 
