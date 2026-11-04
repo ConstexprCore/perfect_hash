@@ -1,4 +1,4 @@
-/* auto-generated on 2026-11-04 20:31:23 +0000. Do not edit! */
+/* auto-generated on 2026-11-04 17:29:56 -0500. Do not edit! */
 /*
  * ConstexprCore perfect_hash 0.4.1 — single-header amalgamation.
  *
@@ -2428,6 +2428,29 @@ static constexpr realign_row_table realign_rows_v = [] {
 //            chunk 1's window and its compare is forced true.
 template <std::size_t MaxKeyLen>
 CONSTEXPRCORE_NO_SANITIZE_ADDRESS constexprcore_really_inline bool compare_2chunks_branchfree(const char* p, std::size_t len, const char* stored) noexcept {
+#if defined(__GNUC__) && !defined(__clang__)
+    // GCC (15.2, 16.0) compiles the ternaries of the generic form below into
+    // branches: one on len >= 16 to choose the second window, which
+    // mispredicts on key sets that mix lengths below and above 16 (0.1 to 0.4
+    // mispredictions per lookup on Graviton 5), and one on the page offset.
+    // This form selects with AND masks instead, and GCC keeps it branch-free.
+    // Clang compiles the generic form to csel and is measurably faster with it.
+    const std::uintptr_t a = reinterpret_cast<std::uintptr_t>(p);
+    const std::size_t off = a & 4095;
+    const std::size_t need = len < 16 ? len : 16;
+    const std::size_t past_4080 = std::size_t{0} - static_cast<std::size_t>(off > 4080);
+    // If the data itself reaches the next page, that page is mapped: no shift.
+    const std::size_t fits = std::size_t{0} - static_cast<std::size_t>(off <= 4096 - need);
+    const std::size_t o = (off - 4080) & past_4080 & fits;
+    const std::size_t long_mask = std::size_t{0} - static_cast<std::size_t>(len >= 16);
+    const char* p1 = p - o;
+    eqmask16 m = eq_chunk(shuffle_row(load_raw16(p1), realign_rows_v.rows[need][o]), stored);
+    // Second window: bytes [len-16, len) for len >= 16, otherwise chunk 1's
+    // window again (p + len - 16 == p1 + o + len - 16), forced to compare equal.
+    const std::size_t off2 = (len - 16) & long_mask;
+    const char* p2 = p1 + ((o + off2) & long_mask);  // always a safe window
+    eqmask16 m2 = eq_or(eq_chunk(load_raw16(p2), stored + off2), eq_force(long_mask == 0));
+#else
     const std::uintptr_t a = reinterpret_cast<std::uintptr_t>(p);
     const std::size_t off = a & 4095;
     const std::size_t need = len < 16 ? len : 16;
@@ -2439,6 +2462,7 @@ CONSTEXPRCORE_NO_SANITIZE_ADDRESS constexprcore_really_inline bool compare_2chun
     const std::size_t off2 = short_key ? 0 : len - 16;
     const char* p2 = short_key ? p1 : p + off2;  // always a safe window
     eqmask16 m2 = eq_or(eq_chunk(load_raw16(p2), stored + off2), eq_force(short_key));
+#endif
     return all_equal(eq_and(m, m2));
 }
 #endif
