@@ -356,7 +356,12 @@ CONSTEXPRCORE_NO_SANITIZE_ADDRESS constexprcore_really_inline bool compare_chunk
         if (full_object) return compare_2chunks_branchfree<MaxKeyLen>(p, len, stored);
 #endif
     const std::uintptr_t addr = reinterpret_cast<std::uintptr_t>(p);
+#if defined(CONSTEXPRCORE_ABLATE_NO_PAGE_GUARD) && CONSTEXPRCORE_ABLATE_NO_PAGE_GUARD
+    (void)addr;
+    if (full_object) [[likely]] {   // ablation: no page-boundary test (unsafe)
+#else
     if (full_object && (addr & 4095) <= 4096 - SPAN) [[likely]] {
+#endif
         return compare_chunks_direct<MaxKeyLen>(p, len, stored);
     }
     alignas(16) char buf[SPAN] = {};

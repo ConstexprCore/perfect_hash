@@ -77,6 +77,47 @@
 
 
 
+// ----------------------------------------------------------------------------
+// Ablation switches (paper experiments only). Each one disables a single
+// runtime optimization so that its effect can be measured in isolation. All
+// default to 0: the library is unchanged unless one is defined.
+//   CONSTEXPRCORE_ABLATE_SCALAR_COMPARE  byte loop with early exit for the key comparison
+//   CONSTEXPRCORE_ABLATE_MEMCMP          std::memcmp for the key comparison
+//   CONSTEXPRCORE_ABLATE_NO_OVERLAP      no overlap encoding for keys of at most 4 bytes
+//   CONSTEXPRCORE_ABLATE_NO_PAGE_GUARD   16-byte loads without the page-boundary test (unsafe)
+//   CONSTEXPRCORE_ABLATE_HASH_BRANCHY    always use the branchy position reads in the hash
+//   CONSTEXPRCORE_ABLATE_HASH_BRANCHLESS always use the branch-free position reads in the hash
+//   CONSTEXPRCORE_ABLATE_LEN_FIRST       test the stored length before comparing the key bytes
+//   CONSTEXPRCORE_ABLATE_VALUE_INDIRECT  map values through slot_to_key_ (declaration order)
+//   CONSTEXPRCORE_ABLATE_NO_DIRECT_TABLE no direct 256-entry table for single-byte key sets
+// ----------------------------------------------------------------------------
+#ifndef CONSTEXPRCORE_ABLATE_SCALAR_COMPARE
+#define CONSTEXPRCORE_ABLATE_SCALAR_COMPARE 0
+#endif
+#ifndef CONSTEXPRCORE_ABLATE_MEMCMP
+#define CONSTEXPRCORE_ABLATE_MEMCMP 0
+#endif
+#ifndef CONSTEXPRCORE_ABLATE_NO_OVERLAP
+#define CONSTEXPRCORE_ABLATE_NO_OVERLAP 0
+#endif
+#ifndef CONSTEXPRCORE_ABLATE_HASH_BRANCHY
+#define CONSTEXPRCORE_ABLATE_HASH_BRANCHY 0
+#endif
+#ifndef CONSTEXPRCORE_ABLATE_HASH_BRANCHLESS
+#define CONSTEXPRCORE_ABLATE_HASH_BRANCHLESS 0
+#endif
+#ifndef CONSTEXPRCORE_ABLATE_LEN_FIRST
+#define CONSTEXPRCORE_ABLATE_LEN_FIRST 0
+#endif
+#ifndef CONSTEXPRCORE_ABLATE_VALUE_INDIRECT
+#define CONSTEXPRCORE_ABLATE_VALUE_INDIRECT 0
+#endif
+#ifndef CONSTEXPRCORE_ABLATE_NO_DIRECT_TABLE
+#define CONSTEXPRCORE_ABLATE_NO_DIRECT_TABLE 0
+#endif
+#define CONSTEXPRCORE_ABLATE_GENERIC_COMPARE \
+    (CONSTEXPRCORE_ABLATE_SCALAR_COMPARE || CONSTEXPRCORE_ABLATE_MEMCMP)
+
 namespace ConstexprCore {
 
 // ============================================================================
@@ -112,12 +153,15 @@ struct perfect_hash_set {
     //       (len & 31 for 16) instead of min(len, MaxKeyLen). That is the
     //       same row for any length a key can have, and a valid row
     //       otherwise, which is enough: such an input fails the length test.
-    static constexpr bool KEY_COMPARE_CHECKS_LEN = MaxKeyLen <= 4;
+    static constexpr bool KEY_COMPARE_CHECKS_LEN = MaxKeyLen <= 4
+        && !CONSTEXPRCORE_ABLATE_GENERIC_COMPARE && !CONSTEXPRCORE_ABLATE_NO_OVERLAP
+        && !CONSTEXPRCORE_ABLATE_LEN_FIRST;
+    static constexpr bool USE_DIRECT_TABLE = MaxKeyLen == 1 && !CONSTEXPRCORE_ABLATE_NO_DIRECT_TABLE;
     // The lookups go through key_matches_ only where it differs from the
     // general compare_key_ + slot_key_len_ test.
     static constexpr bool USE_KEY_MATCHES = KEY_COMPARE_CHECKS_LEN
 #if CONSTEXPRCORE_HAS_NEON && CONSTEXPRCORE_USE_NEON_SHORT_KEY_LOOKUP
-        || MaxKeyLen <= 16
+        || (MaxKeyLen <= 16 && !CONSTEXPRCORE_ABLATE_GENERIC_COMPARE && !CONSTEXPRCORE_ABLATE_LEN_FIRST)
 #endif
         ;
     static constexpr bool LEN_IN_DATA_BYTE15 =
@@ -493,7 +537,17 @@ struct perfect_hash_set {
                 if (a[i] != p[i]) return false;
             return true;
         } else {
-            if constexpr (MaxKeyLen <= 4) {
+#if CONSTEXPRCORE_ABLATE_SCALAR_COMPARE
+            {
+                const char* a = slot_key_data_[slot].data();
+                for (std::size_t i = 0; i < len; ++i)
+                    if (a[i] != p[i]) return false;
+                return true;
+            }
+#elif CONSTEXPRCORE_ABLATE_MEMCMP
+            return std::memcmp(p, slot_key_data_[slot].data(), len) == 0;
+#endif
+            if constexpr (MaxKeyLen <= 4 && !CONSTEXPRCORE_ABLATE_NO_OVERLAP) {
                 // Overlap comparison: for MaxKeyLen <= 4, overlap covers all bytes.
                 std::uint64_t encoded;
                 if (len >= 2) {
@@ -629,7 +683,7 @@ struct perfect_hash_set {
 
     [[nodiscard]] constexpr constexprcore_really_inline bool contains(std::string_view key) const noexcept {
         // MaxKeyLen == 1 fast path: direct byte-indexed lookup, no hash needed.
-        if constexpr (MaxKeyLen == 1) {
+        if constexpr (USE_DIRECT_TABLE) {
             if (key.size() == 1)
                 return direct_lookup_[static_cast<unsigned char>(key[0])] != 0xFF;
             if (key.size() > 1) return false;
@@ -705,7 +759,8 @@ struct perfect_hash_set {
         // shuffled streams, and long-key sets (MaxKeyLen > 16) tend to select
         // positions beyond the shortest keys (e.g. Counters: position 8 vs
         // 6-8-byte keys -> 0.31+ misses/lookup on the branchy form).
-        if constexpr (N >= 64 || MaxKeyLen > 16) {
+        if constexpr (CONSTEXPRCORE_ABLATE_HASH_BRANCHLESS
+                      || ((N >= 64 || MaxKeyLen > 16) && !CONSTEXPRCORE_ABLATE_HASH_BRANCHY)) {
             const std::size_t klen = key.size();
             // An empty view may have a null data pointer. The masked load
             // still reads byte zero, so give it valid storage in that case.
@@ -749,16 +804,21 @@ struct perfect_hash_set {
         if constexpr (USE_KEY_MATCHES) {
             if (!key_matches_(key.data(), len, slot)) return std::nullopt;
         } else {
+#if CONSTEXPRCORE_ABLATE_LEN_FIRST
+            if (slot_key_len_[slot] != len) return std::nullopt;
+            if (!compare_key_(key.data(), clamped_len, slot)) return std::nullopt;
+#else
             // Short-circuit ordering matters. Compare keys first to avoid
             // mispredictions on misses.
             if (!compare_key_(key.data(), clamped_len, slot)) return std::nullopt;
             if (slot_key_len_[slot] != len) return std::nullopt;
+#endif
         }
         return std::optional<std::size_t>{slot};
     }
 
     [[nodiscard]] constexpr constexprcore_really_inline std::optional<std::size_t> index_of(std::string_view key) const noexcept {
-        if constexpr (MaxKeyLen == 1) {
+        if constexpr (USE_DIRECT_TABLE) {
             // Branchless fast path when "" is not in the set (the common case).
             // The natural form `if (key.size() == 1) ...; if (key.size() > 1)
             // return nullopt;` has a size-check branch that mispredicts when
@@ -799,9 +859,14 @@ struct perfect_hash_set {
         if constexpr (USE_KEY_MATCHES) {
             if (!key_matches_(key.data(), len, slot)) return std::nullopt;
         } else {
+#if CONSTEXPRCORE_ABLATE_LEN_FIRST
+            if (slot_key_len_[slot] != len) return std::nullopt;
+            if (!compare_key_(key.data(), clamped_len, slot)) return std::nullopt;
+#else
             // See slot_match() for short-circuit ordering rationale.
             if (!compare_key_(key.data(), clamped_len, slot)) return std::nullopt;
             if (slot_key_len_[slot] != len) return std::nullopt;
+#endif
         }
         return std::optional<std::size_t>{slot_to_key_[slot]};
     }
@@ -858,7 +923,8 @@ struct perfect_hash_map {
     }
 
     [[nodiscard]] constexpr constexprcore_really_inline std::optional<ValueT> lookup(std::string_view key) const noexcept {
-        if constexpr (MaxKeyLen == 1) {
+        if constexpr (perfect_hash_set<N, TableSize, MaxKeyLen>::USE_DIRECT_TABLE
+                      || CONSTEXPRCORE_ABLATE_VALUE_INDIRECT) {
             // Direct table path: index_of already returns declaration-order index
             auto idx = set_.index_of(key);
             if (idx.has_value()) return values_[*idx];

@@ -77,7 +77,12 @@ CONSTEXPRCORE_NO_SANITIZE_ADDRESS constexprcore_really_inline __m128i page_safe_
 #else
     const bool full_object = true;
 #endif
+#if defined(CONSTEXPRCORE_ABLATE_NO_PAGE_GUARD) && CONSTEXPRCORE_ABLATE_NO_PAGE_GUARD
+    (void)addr;
+    if (full_object) [[likely]] {   // ablation: no page-boundary test (unsafe)
+#else
     if (full_object && (addr & 4095) <= 4096 - 16) [[likely]] {
+#endif
         return sse2_load_mapped_16(p);
     }
     alignas(16) std::uint8_t buf[16] = {};
