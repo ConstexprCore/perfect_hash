@@ -242,7 +242,7 @@ struct perfect_hash_set {
         for (std::size_t s = 0; s < TableSize; ++s) {
             if (slot_to_key_[s] < N) {
                 auto k = keys[slot_to_key_[s]];
-                if constexpr (MaxKeyLen <= 4) {
+                if constexpr (MaxKeyLen <= 4 && !CONSTEXPRCORE_ABLATE_NO_OVERLAP) {
                     // Overlap encoding: lo16 | hi16<<16 | len<<32.
                     // For MaxKeyLen <= 4, overlap covers all bytes.
                     if (k.size() >= 2) {
