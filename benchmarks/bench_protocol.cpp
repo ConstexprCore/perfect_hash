@@ -110,11 +110,20 @@ namespace gperf_jsreserved {
 // Infrastructure
 // ============================================================================
 
+// One collector for the whole process. A function-local static in the
+// template below would open a perf event group (4 file descriptors) per
+// instantiation; with ~270 instantiations the process runs out of
+// descriptors and the later key sets silently lose their counters.
+inline counters::event_collector &shared_collector() {
+  static thread_local counters::event_collector collector;
+  return collector;
+}
+
 template <class Function1, class Function2>
 counters::event_aggregate shuffle_bench(Function1 &&function1,
                                         Function2 &&function2,
                                         size_t min_repeat = 300) {
-  static thread_local counters::event_collector collector;
+  counters::event_collector &collector = shared_collector();
   auto fn = std::forward<Function1>(function1);
   auto fn2 = std::forward<Function2>(function2);
   counters::event_aggregate aggregate{};
