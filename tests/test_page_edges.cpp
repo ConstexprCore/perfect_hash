@@ -53,6 +53,12 @@ constexpr auto header15_set = ConstexprCore::make_perfect_set<
     "If-None-Match", "Location", "Origin", "Referer", "Server",
     "Set-Cookie", "User-Agent", "Vary", "Via", "X-Forwarded-For">();
 
+// MaxKeyLen 17..32: the two-chunk compare (branch-free on targets with a byte
+// shuffle), with keys both shorter and longer than 16 bytes.
+constexpr auto counter_set = ConstexprCore::make_perfect_set<
+    "total_items", "successful_operations", "failed_operations", "warnings", "errors",
+    "retries", "bytes_processed", "records_read", "records_matched", "records_written">();
+
 template <typename Set>
 std::optional<std::size_t> expected_index(const Set& set, std::string_view probe) {
     for (std::size_t i = 0; i < set.size(); ++i)
@@ -110,5 +116,6 @@ TEST_CASE("classic lookups are exact for inputs that end at a protected page") {
     check_probes_before(protocol_set, end);
     check_probes_before(header_set, end);
     check_probes_before(header15_set, end);
+    check_probes_before(counter_set, end);
 }
 #endif
