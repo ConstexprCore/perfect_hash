@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.20)
 project(perfect_hash
-    VERSION 0.4.1
+    VERSION 0.4.2
     DESCRIPTION "Compile-time perfect hashing for C++"
     LANGUAGES CXX
 )
