@@ -1,4 +1,4 @@
-/* auto-generated on 2026-10-28 22:29:46 +0000. Do not edit! */
+/* auto-generated on 2026-11-04 01:23:24 +0000. Do not edit! */
 /*
  * ConstexprCore perfect_hash 0.4.0 — single-header amalgamation.
  *
@@ -1606,10 +1606,12 @@ CONSTEXPRCORE_NO_SANITIZE_ADDRESS constexprcore_really_inline uint8x16_t page_sa
 }
 
 // NEON 16-byte key comparison using TBL masking + vceqq.
-// p: input key data, len: key length (1-16), stored: slot_key_data (16+ bytes, zero-padded).
+// p: input key data, len: key length (0-16; 17-31 compare all 16 bytes, for
+// callers that index with len & 31 and check the length themselves),
+// stored: slot_key_data (16+ bytes, zero-padded).
 constexprcore_really_inline bool neon_compare_16(const char* p, std::size_t len, const char* stored) noexcept {
     // Local mask copy — gives better codegen (PC-relative addressing) than shared table.
-    static constexpr std::uint8_t masks[17][16] = {
+    static constexpr std::uint8_t masks[32][16] = {
         {0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
         {0,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
         {0,1,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
@@ -1627,6 +1629,21 @@ constexprcore_really_inline bool neon_compare_16(const char* p, std::size_t len,
         {0,1,2,3,4,5,6,7,8,9,10,11,12,13,0x80,0x80},
         {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,0x80},
         {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
     };
 
     uint8x16_t raw = page_safe_load_16(p, len);
@@ -1643,12 +1660,33 @@ constexprcore_really_inline bool neon_compare_16(const char* p, std::size_t len,
     return vget_lane_u64(vreinterpret_u64_u8(narrowed), 0) == ~0ULL;
 }
 
+// NEON comparison of bytes 0..14 for keys of 9 to 15 bytes whose stored row
+// holds the key length in byte 15 (perfect_hash_set::LEN_IN_DATA_BYTE15).
+// stored_len receives that byte from the same load, so the caller checks the
+// length without another load. len is 0-15 (any value for a longer key,
+// whose length the caller rejects). The input's byte 15 is zero, and a stored
+// length byte is zero only in an empty slot or the slot of the empty key,
+// which no non-empty input matches: the result requires byte 15 to differ,
+// which also rejects those two.
+constexprcore_really_inline bool neon_compare_15(const char* p, std::size_t len, const char* stored,
+                                                 std::uint8_t& stored_len) noexcept {
+    uint8x16_t raw = page_safe_load_16(p, len);
+    uint8x16_t input = vqtbl1q_u8(raw, vld1q_u8(tbl_masks[len]));
+    uint8x16_t stored_vec = vld1q_u8(reinterpret_cast<const uint8_t*>(stored));
+    stored_len = vgetq_lane_u8(stored_vec, 15);
+    uint8x16_t cmp = vceqq_u8(input, stored_vec);
+    uint8x8_t narrowed = vshrn_n_u16(vreinterpretq_u16_u8(cmp), 4);
+    return vget_lane_u64(vreinterpret_u64_u8(narrowed), 0) == 0x0FFFFFFFFFFFFFFFull;
+}
+
 // NEON 8-byte key comparison for MaxKeyLen <= 8.
 // Same page-safe load + TBL masking, but extracts lower uint64 instead of full 16-byte vceqq.
 // Replaces the safe_byte_ chain (~5 conditional insn per byte) with ~5 NEON insn total.
-// p: input key data, len: key length (1-8), stored_packed: packed_keys_[slot] value.
+// p: input key data, len: key length (0-8; 9-15 compare all 8 bytes, for
+// callers that index with len & 15 and check the length themselves),
+// stored_packed: packed_keys_[slot] value.
 constexprcore_really_inline bool neon_compare_8(const char* p, std::size_t len, std::uint64_t stored_packed) noexcept {
-    static constexpr std::uint8_t masks[9][16] = {
+    static constexpr std::uint8_t masks[16][16] = {
         {0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
         {0,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
         {0,1,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
@@ -1657,6 +1695,13 @@ constexprcore_really_inline bool neon_compare_8(const char* p, std::size_t len, 
         {0,1,2,3,4,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
         {0,1,2,3,4,5,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
         {0,1,2,3,4,5,6,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
+        {0,1,2,3,4,5,6,7,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
+        {0,1,2,3,4,5,6,7,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
+        {0,1,2,3,4,5,6,7,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
+        {0,1,2,3,4,5,6,7,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
+        {0,1,2,3,4,5,6,7,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
+        {0,1,2,3,4,5,6,7,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
+        {0,1,2,3,4,5,6,7,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
         {0,1,2,3,4,5,6,7,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
     };
 
@@ -2862,10 +2907,11 @@ struct wide_perfect_hash_set {
         for (std::size_t i = 1; i < N; ++i) if (keys[i].size() < mn) mn = keys[i].size();
         min_key_len_ = static_cast<std::uint8_t>(mn > 255 ? 255 : mn);
         for (std::size_t b = 0; b < B; ++b) pilots_[b] = static_cast<pilot_t>(plan.pilots[b]);
-        for (std::size_t s = 0; s < TableSize; ++s) {
+        // An empty slot keeps slot_key_len_ 0: empty inputs are answered
+        // before any comparison, and 0xFFFF would equal the length of a
+        // 65535-byte input whose first bytes are zero, like the empty slot's.
+        for (std::size_t s = 0; s < TableSize; ++s)
             slot_to_key_[s] = static_cast<index_t>(plan.slot_to_key[s] < N ? plan.slot_to_key[s] : N);
-            if constexpr (!LANE_COMPARE) slot_key_len_[s] = 0xFFFF;
-        }
         for (std::size_t s = 0; s < TableSize; ++s) {
             const std::size_t ki = slot_to_key_[s];
             if (ki >= N) continue;
@@ -3204,6 +3250,21 @@ consteval auto make_wide_perfect_index_map() {
 #endif
 #endif
 
+// MaxKeyLen 5-16 on NEON: pick the mask row with len & 15 (len & 31 for 16)
+// and, for 9-15, read the key length from the loaded key row (see
+// perfect_hash_set::KEY_COMPARE_CHECKS_LEN).
+// On by default with clang, where it was measured. GCC 16 merges the length
+// test into the miss branch (umov + ccmp) and lays the lookup loop out
+// differently, which slowed misses, so it keeps the general path. Define to
+// 0 or 1 to choose.
+#ifndef CONSTEXPRCORE_USE_NEON_SHORT_KEY_LOOKUP
+#if defined(__clang__) && CONSTEXPRCORE_HAS_NEON
+#define CONSTEXPRCORE_USE_NEON_SHORT_KEY_LOOKUP 1
+#else
+#define CONSTEXPRCORE_USE_NEON_SHORT_KEY_LOOKUP 0
+#endif
+#endif
+
 #ifndef CONSTEXPRCORE_USE_LSX_FOR_32_BYTE_COMPARE
 #if CONSTEXPRCORE_HAS_LSX
 #define CONSTEXPRCORE_USE_LSX_FOR_32_BYTE_COMPARE 1
@@ -3225,13 +3286,44 @@ struct perfect_hash_set {
     static_assert(N <= 255, "N must be <= 255 for uint8_t key indices");
     static_assert(TableSize <= 256, "TableSize must be <= 256 (uint8_t slot array length)");
     static_assert(MaxKeyLen >= 1 && MaxKeyLen < 255,
-                  "MaxKeyLen must be in [1, 254] to reserve 0xFF as empty sentinel");
+                  "MaxKeyLen must be in [1, 254] (longer keys use the wide container)");
     static_assert(detail::MAX_POSITIONS <= 255, "MAX_POSITIONS must fit in uint8_t");
 
     static constexpr std::uint8_t POS_LAST_CHAR = 255;
     static constexpr std::uint8_t HD_MODE = 0xFF; // num_positions_ sentinel for Hash-and-Displace mode
     static constexpr std::uint8_t FULLHASH_MODE = 0xFE; // num_positions_ sentinel for seeded whole-key-hash mode
     static constexpr bool TABLE_SIZE_IS_POW2 = (TableSize & (TableSize - 1)) == 0;
+
+    // A lookup tests slot_key_len_[slot] after the key bytes match. On
+    // AArch64 that load alone takes three instructions: slot_key_len_ sits
+    // after the 4 KB of asso tables, out of reach of a byte load's immediate
+    // offset. Short keys avoid part of that work:
+    //   MaxKeyLen <= 4: the overlap encoding includes the length, so one
+    //       comparison checks both. The lookup encodes min(len, MaxKeyLen + 1):
+    //       the length itself whenever a key could match, and a value no
+    //       stored length has otherwise.
+    // With CONSTEXPRCORE_USE_NEON_SHORT_KEY_LOOKUP:
+    //   MaxKeyLen 9..15: byte 15 of the slot_key_data_ row holds the length.
+    //       The lookup compares bytes 0..14 and then reads the length from
+    //       the row it has already loaded.
+    //   MaxKeyLen 5..16: the comparison picks its mask row with len & 15
+    //       (len & 31 for 16) instead of min(len, MaxKeyLen). That is the
+    //       same row for any length a key can have, and a valid row
+    //       otherwise, which is enough: such an input fails the length test.
+    static constexpr bool KEY_COMPARE_CHECKS_LEN = MaxKeyLen <= 4;
+    // The lookups go through key_matches_ only where it differs from the
+    // general compare_key_ + slot_key_len_ test.
+    static constexpr bool USE_KEY_MATCHES = KEY_COMPARE_CHECKS_LEN
+#if CONSTEXPRCORE_HAS_NEON && CONSTEXPRCORE_USE_NEON_SHORT_KEY_LOOKUP
+        || MaxKeyLen <= 16
+#endif
+        ;
+    static constexpr bool LEN_IN_DATA_BYTE15 =
+#if CONSTEXPRCORE_HAS_NEON && CONSTEXPRCORE_USE_NEON_SHORT_KEY_LOOKUP
+        MaxKeyLen >= 9 && MaxKeyLen <= 15;
+#else
+        false;
+#endif
 
     // Mode sentinels must not collide with a valid num_positions value.
     static_assert(detail::MAX_POSITIONS < HD_MODE,
@@ -3245,7 +3337,7 @@ struct perfect_hash_set {
     std::array<std::uint8_t, detail::MAX_POSITIONS> positions_{};
     std::uint8_t min_key_len_{};
     std::uint64_t hash_seed_{};   // FULLHASH_MODE only: seed of the whole-key hash
-    std::array<std::uint8_t, TableSize> slot_key_len_{};                    // key length (0xFF = empty)
+    std::array<std::uint8_t, TableSize> slot_key_len_{};                    // key length (0 if empty)
 #if CONSTEXPRCORE_HAS_NEON || CONSTEXPRCORE_HAS_SSE2 || CONSTEXPRCORE_HAS_LSX
     std::array<std::array<char, (MaxKeyLen + 15)/16 * 16>, TableSize> slot_key_data_{};    // inline key bytes
 #else
@@ -3273,15 +3365,20 @@ struct perfect_hash_set {
             if (keys[i].size() < mn) mn = keys[i].size();
         min_key_len_ = static_cast<std::uint8_t>(mn);
 
-        // Step 2: Populate inline key data and inverse mapping.
-        for (std::size_t s = 0; s < TableSize; ++s)
-            slot_key_len_[s] = 0xFF;
+        // Step 2: Populate inline key data and inverse mapping. An empty
+        // slot keeps length 0. An empty input never reaches one (it is
+        // rejected first, or it hashes to the slot of the empty key), and
+        // every other input is longer. A marker such as 0xFF would equal the
+        // length of a 255-byte input, which then matched an empty slot whose
+        // zero bytes it shared.
         for (std::size_t s = 0; s < TableSize; ++s) {
             if (slot_to_key_[s] < N) {
                 auto k = keys[slot_to_key_[s]];
                 slot_key_len_[s] = static_cast<std::uint8_t>(k.size());
                 for (std::size_t c = 0; c < k.size(); ++c)
                     slot_key_data_[s][c] = k[c];
+                if constexpr (LEN_IN_DATA_BYTE15)
+                    slot_key_data_[s][15] = static_cast<char>(k.size());
                 key_to_slot_[slot_to_key_[s]] = static_cast<std::uint8_t>(s);
             }
         }
@@ -3499,6 +3596,78 @@ struct perfect_hash_set {
         return v;
     }
 
+    // MaxKeyLen <= 4: key bytes and length in one comparison of the overlap
+    // encoding (see KEY_COMPARE_CHECKS_LEN). len is the full key length.
+    [[nodiscard]] constexpr constexprcore_really_inline bool match_key_(
+        const char* p, std::size_t len, std::size_t slot) const noexcept {
+        static_assert(KEY_COMPARE_CHECKS_LEN);
+        // data() may be null for an empty key: only the length can match.
+        if (len == 0) return slot_key_len_[slot] == 0;
+        if consteval {
+            if (slot_key_len_[slot] != len) return false;
+            const char* a = slot_key_data_[slot].data();
+            for (std::size_t i = 0; i < len; ++i)
+                if (a[i] != p[i]) return false;
+            return true;
+        } else {
+            // Also the number of bytes read, never more than len.
+            const std::size_t c = len <= MaxKeyLen ? len : MaxKeyLen + 1;
+            std::uint64_t encoded;
+            if (c >= 2) {
+                std::uint16_t lo, hi;
+                copy_bytes_(&lo, p, 2);
+                copy_bytes_(&hi, p + c - 2, 2);
+                encoded = lo | (static_cast<std::uint64_t>(hi) << 16)
+                    | (static_cast<std::uint64_t>(c) << 32);
+            } else {
+                encoded = static_cast<unsigned char>(p[0])
+                    | (static_cast<std::uint64_t>(1) << 32);
+            }
+            return encoded == packed_keys_[slot];
+        }
+    }
+
+    // Key bytes and length against the stored key at a slot, as the lookups
+    // need them; len is the full key length.
+    [[nodiscard]] constexpr constexprcore_really_inline bool key_matches_(
+        const char* p, std::size_t len, std::size_t slot) const noexcept {
+        if constexpr (KEY_COMPARE_CHECKS_LEN) {
+            return match_key_(p, len, slot);
+        } else {
+#if CONSTEXPRCORE_HAS_NEON && CONSTEXPRCORE_USE_NEON_SHORT_KEY_LOOKUP
+            // See KEY_COMPARE_CHECKS_LEN for the masked row index. An empty
+            // key (data() may be null) takes the general path below.
+            if constexpr (MaxKeyLen <= 16) {
+                if !consteval {
+                    if (len != 0) {
+                        if constexpr (MaxKeyLen <= 8) {
+                            if (!detail::neon_compare_8(p, len & 15, packed_keys_[slot])) return false;
+                            return slot_key_len_[slot] == len;
+                        } else if constexpr (LEN_IN_DATA_BYTE15) {
+                            std::uint8_t stored_len;
+                            // [[likely]] keeps the length test a branch of its
+                            // own, after the one misses take. Otherwise LLVM
+                            // merges the two (umov + ccmp), and every miss
+                            // reads the length too.
+                            if (!detail::neon_compare_15(p, len & 15, slot_key_data_[slot].data(), stored_len))
+                                [[likely]] return false;
+                            return stored_len == len;
+                        } else {
+                            if (!detail::neon_compare_16(p, len & 31, slot_key_data_[slot].data())) return false;
+                            return slot_key_len_[slot] == len;
+                        }
+                    }
+                }
+            }
+#endif
+            auto clamped_len = len <= MaxKeyLen ? len : MaxKeyLen;
+            // Short-circuit ordering matters. Compare keys first to avoid
+            // mispredictions on misses.
+            if (!compare_key_(p, clamped_len, slot)) return false;
+            return slot_key_len_[slot] == len;
+        }
+    }
+
     // Compare key bytes against the stored key at a slot.
     // Three strategies, selected at compile time:
     //
@@ -3556,6 +3725,10 @@ struct perfect_hash_set {
 #if CONSTEXPRCORE_HAS_NEON
                 // ARM64 NEON: page-safe 16-byte load + TBL masking + vceqq.
                 // Replaces ~48 insn of safe_byte packing with ~5 NEON insn.
+                if constexpr (LEN_IN_DATA_BYTE15) {
+                    std::uint8_t stored_len;   // byte 15 holds the length here
+                    return detail::neon_compare_15(p, len, slot_key_data_[slot].data(), stored_len);
+                }
                 return detail::neon_compare_16(p, len, slot_key_data_[slot].data());
 #elif CONSTEXPRCORE_HAS_SSE2
                 // x86-64 SSE2: page-safe 16-byte load + AND masking + pcmpeqb/pmovmskb.
@@ -3664,13 +3837,17 @@ struct perfect_hash_set {
         // min_key_len_ is a struct constant so this branch compiles away.
         if (min_key_len_ > 0 && key.empty()) return false;
         auto len = key.size();
-        // Clamp len to MaxKeyLen so compare_key_ never reads past MaxKeyLen bytes.
-        // Out-of-range lengths will fail the len check below.
-        auto clamped_len = len <= MaxKeyLen ? len : MaxKeyLen;
-        std::size_t slot = compute_hash(key);
-        bool len_ok = (slot_key_len_[slot] == len);
-        bool key_ok = compare_key_(key.data(), clamped_len, slot);
-        return len_ok & key_ok;
+        if constexpr (USE_KEY_MATCHES) {
+            return key_matches_(key.data(), len, compute_hash(key));
+        } else {
+            // Clamp len to MaxKeyLen so compare_key_ never reads past MaxKeyLen bytes.
+            // Out-of-range lengths will fail the len check below.
+            auto clamped_len = len <= MaxKeyLen ? len : MaxKeyLen;
+            std::size_t slot = compute_hash(key);
+            bool len_ok = (slot_key_len_[slot] == len);
+            bool key_ok = compare_key_(key.data(), clamped_len, slot);
+            return len_ok & key_ok;
+        }
     }
 
     [[nodiscard]] constexpr constexprcore_really_inline std::size_t compute_hash(std::string_view key) const noexcept {
@@ -3767,10 +3944,14 @@ struct perfect_hash_set {
         auto len = key.size();
         auto clamped_len = len <= MaxKeyLen ? len : MaxKeyLen;
         std::size_t slot = compute_hash(key);
-        // Short-circuit ordering matters. Compare keys first to avoid
-        // mispredictions on misses.
-        if (!compare_key_(key.data(), clamped_len, slot)) return std::nullopt;
-        if (slot_key_len_[slot] != len) return std::nullopt;
+        if constexpr (USE_KEY_MATCHES) {
+            if (!key_matches_(key.data(), len, slot)) return std::nullopt;
+        } else {
+            // Short-circuit ordering matters. Compare keys first to avoid
+            // mispredictions on misses.
+            if (!compare_key_(key.data(), clamped_len, slot)) return std::nullopt;
+            if (slot_key_len_[slot] != len) return std::nullopt;
+        }
         return std::optional<std::size_t>{slot};
     }
 
@@ -3813,9 +3994,13 @@ struct perfect_hash_set {
         auto len = key.size();
         auto clamped_len = len <= MaxKeyLen ? len : MaxKeyLen;
         std::size_t slot = compute_hash(key);
-        // See slot_match() for short-circuit ordering rationale.
-        if (!compare_key_(key.data(), clamped_len, slot)) return std::nullopt;
-        if (slot_key_len_[slot] != len) return std::nullopt;
+        if constexpr (USE_KEY_MATCHES) {
+            if (!key_matches_(key.data(), len, slot)) return std::nullopt;
+        } else {
+            // See slot_match() for short-circuit ordering rationale.
+            if (!compare_key_(key.data(), clamped_len, slot)) return std::nullopt;
+            if (slot_key_len_[slot] != len) return std::nullopt;
+        }
         return std::optional<std::size_t>{slot_to_key_[slot]};
     }
 };
@@ -3914,7 +4099,7 @@ inline constexpr std::array<ValueT, sizeof...(KVs)> kv_values_v{static_cast<Valu
 // Container choice. The wide container is selected only where the classic,
 // byte-indexed design cannot be used at all:
 //   N > 255           -> wide    (slot and position tables are byte-indexed)
-//   MaxKeyLen >= 255  -> wide    (the classic hash reserves byte length 255)
+//   MaxKeyLen >= 255  -> wide    (the classic container takes at most 254)
 //   everything else   -> classic
 //
 // An earlier revision also routed short-key sets (MaxKeyLen 2..7, N >= 8) to

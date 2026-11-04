@@ -88,10 +88,12 @@ CONSTEXPRCORE_NO_SANITIZE_ADDRESS constexprcore_really_inline uint8x16_t page_sa
 }
 
 // NEON 16-byte key comparison using TBL masking + vceqq.
-// p: input key data, len: key length (1-16), stored: slot_key_data (16+ bytes, zero-padded).
+// p: input key data, len: key length (0-16; 17-31 compare all 16 bytes, for
+// callers that index with len & 31 and check the length themselves),
+// stored: slot_key_data (16+ bytes, zero-padded).
 constexprcore_really_inline bool neon_compare_16(const char* p, std::size_t len, const char* stored) noexcept {
     // Local mask copy — gives better codegen (PC-relative addressing) than shared table.
-    static constexpr std::uint8_t masks[17][16] = {
+    static constexpr std::uint8_t masks[32][16] = {
         {0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
         {0,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
         {0,1,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
@@ -109,6 +111,21 @@ constexprcore_really_inline bool neon_compare_16(const char* p, std::size_t len,
         {0,1,2,3,4,5,6,7,8,9,10,11,12,13,0x80,0x80},
         {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,0x80},
         {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
+        {0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15},
     };
 
     uint8x16_t raw = page_safe_load_16(p, len);
@@ -125,12 +142,33 @@ constexprcore_really_inline bool neon_compare_16(const char* p, std::size_t len,
     return vget_lane_u64(vreinterpret_u64_u8(narrowed), 0) == ~0ULL;
 }
 
+// NEON comparison of bytes 0..14 for keys of 9 to 15 bytes whose stored row
+// holds the key length in byte 15 (perfect_hash_set::LEN_IN_DATA_BYTE15).
+// stored_len receives that byte from the same load, so the caller checks the
+// length without another load. len is 0-15 (any value for a longer key,
+// whose length the caller rejects). The input's byte 15 is zero, and a stored
+// length byte is zero only in an empty slot or the slot of the empty key,
+// which no non-empty input matches: the result requires byte 15 to differ,
+// which also rejects those two.
+constexprcore_really_inline bool neon_compare_15(const char* p, std::size_t len, const char* stored,
+                                                 std::uint8_t& stored_len) noexcept {
+    uint8x16_t raw = page_safe_load_16(p, len);
+    uint8x16_t input = vqtbl1q_u8(raw, vld1q_u8(tbl_masks[len]));
+    uint8x16_t stored_vec = vld1q_u8(reinterpret_cast<const uint8_t*>(stored));
+    stored_len = vgetq_lane_u8(stored_vec, 15);
+    uint8x16_t cmp = vceqq_u8(input, stored_vec);
+    uint8x8_t narrowed = vshrn_n_u16(vreinterpretq_u16_u8(cmp), 4);
+    return vget_lane_u64(vreinterpret_u64_u8(narrowed), 0) == 0x0FFFFFFFFFFFFFFFull;
+}
+
 // NEON 8-byte key comparison for MaxKeyLen <= 8.
 // Same page-safe load + TBL masking, but extracts lower uint64 instead of full 16-byte vceqq.
 // Replaces the safe_byte_ chain (~5 conditional insn per byte) with ~5 NEON insn total.
-// p: input key data, len: key length (1-8), stored_packed: packed_keys_[slot] value.
+// p: input key data, len: key length (0-8; 9-15 compare all 8 bytes, for
+// callers that index with len & 15 and check the length themselves),
+// stored_packed: packed_keys_[slot] value.
 constexprcore_really_inline bool neon_compare_8(const char* p, std::size_t len, std::uint64_t stored_packed) noexcept {
-    static constexpr std::uint8_t masks[9][16] = {
+    static constexpr std::uint8_t masks[16][16] = {
         {0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
         {0,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
         {0,1,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
@@ -139,6 +177,13 @@ constexprcore_really_inline bool neon_compare_8(const char* p, std::size_t len, 
         {0,1,2,3,4,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
         {0,1,2,3,4,5,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
         {0,1,2,3,4,5,6,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
+        {0,1,2,3,4,5,6,7,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
+        {0,1,2,3,4,5,6,7,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
+        {0,1,2,3,4,5,6,7,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
+        {0,1,2,3,4,5,6,7,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
+        {0,1,2,3,4,5,6,7,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
+        {0,1,2,3,4,5,6,7,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
+        {0,1,2,3,4,5,6,7,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
         {0,1,2,3,4,5,6,7,0x80,0x80,0x80,0x80,0x80,0x80,0x80,0x80},
     };
 

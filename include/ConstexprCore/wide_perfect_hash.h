@@ -93,10 +93,11 @@ struct wide_perfect_hash_set {
         for (std::size_t i = 1; i < N; ++i) if (keys[i].size() < mn) mn = keys[i].size();
         min_key_len_ = static_cast<std::uint8_t>(mn > 255 ? 255 : mn);
         for (std::size_t b = 0; b < B; ++b) pilots_[b] = static_cast<pilot_t>(plan.pilots[b]);
-        for (std::size_t s = 0; s < TableSize; ++s) {
+        // An empty slot keeps slot_key_len_ 0: empty inputs are answered
+        // before any comparison, and 0xFFFF would equal the length of a
+        // 65535-byte input whose first bytes are zero, like the empty slot's.
+        for (std::size_t s = 0; s < TableSize; ++s)
             slot_to_key_[s] = static_cast<index_t>(plan.slot_to_key[s] < N ? plan.slot_to_key[s] : N);
-            if constexpr (!LANE_COMPARE) slot_key_len_[s] = 0xFFFF;
-        }
         for (std::size_t s = 0; s < TableSize; ++s) {
             const std::size_t ki = slot_to_key_[s];
             if (ki >= N) continue;
