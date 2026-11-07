@@ -1,4 +1,4 @@
-// Compile with:  c++ -std=c++23 -I. amalgamation_demo.cpp -o demo
+// Compile with:  c++ -std=c++20 -I. amalgamation_demo.cpp -o demo
 #include "perfect_hash.h"
 
 #include <cstdio>

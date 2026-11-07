@@ -5,7 +5,7 @@ project(perfect_hash
     LANGUAGES CXX
 )
 
-set(CMAKE_CXX_STANDARD 23)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
@@ -34,6 +34,10 @@ FetchContent_Declare(
     GIT_TAG        master
 )
 FetchContent_MakeAvailable(useful_abstractions)
+
+# useful_abstractions asks for cxx_std_23, which would build everything that
+# links this library as C++23. Its headers are valid C++20.
+set_target_properties(useful_abstractions PROPERTIES INTERFACE_COMPILE_FEATURES cxx_std_20)
 
 find_package(Python3 COMPONENTS Interpreter QUIET)
 
@@ -124,7 +128,7 @@ if(PH_INSTALL)
     include(CMakePackageConfigHelpers)
 
     add_library(perfect_hash_installed INTERFACE)
-    target_compile_features(perfect_hash_installed INTERFACE cxx_std_23)
+    target_compile_features(perfect_hash_installed INTERFACE cxx_std_20)
     target_include_directories(perfect_hash_installed INTERFACE
         $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
     set_target_properties(perfect_hash_installed PROPERTIES EXPORT_NAME perfect_hash)

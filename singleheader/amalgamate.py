@@ -45,7 +45,7 @@ DEPENDENCY_DIR_NAME = "useful_abstractions"
 INCLUDE_RE = re.compile(r'^\s*#\s*include\s*(?:"([^"]+)"|<([^>]+)>)')
 PRAGMA_ONCE_RE = re.compile(r'^\s*#\s*pragma\s+once\s*$')
 
-DEMO_SOURCE = '''// Compile with:  c++ -std=c++23 -I. amalgamation_demo.cpp -o demo
+DEMO_SOURCE = '''// Compile with:  c++ -std=c++20 -I. amalgamation_demo.cpp -o demo
 #include "perfect_hash.h"
 
 #include <cstdio>
@@ -202,7 +202,7 @@ def build_header(include_dirs: list[Path], root_header: str, stamp: str) -> str:
         " * Compile-time perfect hashing for C++. Drop this file into your project and",
         " * #include it; it is self-contained and needs no other ConstexprCore headers.",
         " *",
-        " * Requires C++23. Regenerate with singleheader/amalgamate.py.",
+        " * Requires C++20. Regenerate with singleheader/amalgamate.py.",
         " *",
         " * Bundled files, in order:",
     ]
@@ -225,7 +225,7 @@ def compile_demo(header: Path, demo: Path) -> None:
         shutil.copy(header, workdir / header.name)
         shutil.copy(demo, workdir / demo.name)
         binary = workdir / "demo"
-        command = [compiler, "-std=c++23", "-O2", "-I", str(workdir), str(workdir / demo.name), "-o", str(binary)]
+        command = [compiler, "-std=c++20", "-O2", "-I", str(workdir), str(workdir / demo.name), "-o", str(binary)]
         log(" ".join(command))
         subprocess.run(command, check=True)
         subprocess.run([str(binary)], check=True)
