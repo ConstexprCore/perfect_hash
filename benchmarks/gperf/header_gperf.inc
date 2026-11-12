@@ -1,5 +1,5 @@
-/* C++ code produced by gperf version 3.0.3 */
-/* Command-line: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/gperf header.gperf  */
+/* C++ code produced by gperf version 3.3 */
+/* Command-line: gperf header.gperf  */
 /* Computed positions: -k'1' */
 
 #if !((' ' == 32) && ('!' == 33) && ('"' == 34) && ('#' == 35) \
@@ -26,24 +26,29 @@
       && ('w' == 119) && ('x' == 120) && ('y' == 121) && ('z' == 122) \
       && ('{' == 123) && ('|' == 124) && ('}' == 125) && ('~' == 126))
 /* The character set is not based on ISO-646.  */
-#error "gperf generated tables don't work with this execution character set. Please report a bug to <bug-gnu-gperf@gnu.org>."
+#error "gperf generated tables don't work with this execution character set. Please report a bug to <bug-gperf@gnu.org>."
 #endif
 
 #line 1 "header.gperf"
 
 #include <cstring>
+/* A map, like the other benchmark methods: the value is the declaration index.
+   %compare-strncmp: strncmp without a length table: faster on this set's short keys.
+   Regenerate with regenerate.sh. */
+#line 14 "header.gperf"
+struct HeaderGperfEntry { const char *name; int value; };
 /* maximum key range = 28, duplicates = 0 */
 
 class HeaderGperf
 {
 private:
-  static inline unsigned int hash (const char *str, unsigned int len);
+  static inline unsigned int hash (const char *str, size_t len);
 public:
-  static const char *lookup (const char *str, unsigned int len);
+  static const struct HeaderGperfEntry *lookup (const char *str, size_t len);
 };
 
 inline unsigned int
-HeaderGperf::hash (const char *str, unsigned int len)
+HeaderGperf::hash (const char *str, size_t len)
 {
   static const unsigned char asso_values[] =
     {
@@ -74,11 +79,11 @@ HeaderGperf::hash (const char *str, unsigned int len)
       31, 31, 31, 31, 31, 31, 31, 31, 31, 31,
       31, 31, 31, 31, 31, 31
     };
-  return len + asso_values[(unsigned char)str[0]];
+  return len + asso_values[static_cast<unsigned char>(str[0])];
 }
 
-const char *
-HeaderGperf::lookup (const char *str, unsigned int len)
+const struct HeaderGperfEntry *
+HeaderGperf::lookup (const char *str, size_t len)
 {
   enum
     {
@@ -89,35 +94,62 @@ HeaderGperf::lookup (const char *str, unsigned int len)
       MAX_HASH_VALUE = 30
     };
 
-  static const char * const wordlist[] =
+#if (defined __GNUC__ && __GNUC__ + (__GNUC_MINOR__ >= 6) > 4) || (defined __clang__ && __clang_major__ >= 3)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#endif
+  static const struct HeaderGperfEntry wordlist[] =
     {
-      "", "", "",
-      "Via",
-      "Vary",
-      "",
-      "Cookie",
-      "Referer",
-      "Location",
-      "Host",
-      "Connection",
-      "Accept",
-      "Content-Type",
-      "Cache-Control",
-      "Content-Length",
-      "X-Forwarded-For",
-      "Origin",
-      "",
-      "Authorization",
-      "Date",
-      "Accept-Encoding",
-      "Server",
-      "",
-      "If-None-Match",
-      "",
-      "Set-Cookie",
-      "", "", "", "",
-      "User-Agent"
+      {""}, {""}, {""},
+#line 34 "header.gperf"
+      {"Via", 18},
+#line 33 "header.gperf"
+      {"Vary", 17},
+      {""},
+#line 23 "header.gperf"
+      {"Cookie", 7},
+#line 29 "header.gperf"
+      {"Referer", 13},
+#line 27 "header.gperf"
+      {"Location", 11},
+#line 25 "header.gperf"
+      {"Host", 9},
+#line 20 "header.gperf"
+      {"Connection", 4},
+#line 16 "header.gperf"
+      {"Accept", 0},
+#line 22 "header.gperf"
+      {"Content-Type", 6},
+#line 19 "header.gperf"
+      {"Cache-Control", 3},
+#line 21 "header.gperf"
+      {"Content-Length", 5},
+#line 35 "header.gperf"
+      {"X-Forwarded-For", 19},
+#line 28 "header.gperf"
+      {"Origin", 12},
+      {""},
+#line 18 "header.gperf"
+      {"Authorization", 2},
+#line 24 "header.gperf"
+      {"Date", 8},
+#line 17 "header.gperf"
+      {"Accept-Encoding", 1},
+#line 30 "header.gperf"
+      {"Server", 14},
+      {""},
+#line 26 "header.gperf"
+      {"If-None-Match", 10},
+      {""},
+#line 31 "header.gperf"
+      {"Set-Cookie", 15},
+      {""}, {""}, {""}, {""},
+#line 32 "header.gperf"
+      {"User-Agent", 16}
     };
+#if (defined __GNUC__ && __GNUC__ + (__GNUC_MINOR__ >= 6) > 4) || (defined __clang__ && __clang_major__ >= 3)
+#pragma GCC diagnostic pop
+#endif
 
   if (len <= MAX_WORD_LENGTH && len >= MIN_WORD_LENGTH)
     {
@@ -125,13 +157,13 @@ HeaderGperf::lookup (const char *str, unsigned int len)
 
       if (key <= MAX_HASH_VALUE)
         {
-          const char *s = wordlist[key];
+          const char *s = wordlist[key].name;
 
           if (*str == *s && !strncmp (str + 1, s + 1, len - 1) && s[len] == '\0')
-            return s;
+            return &wordlist[key];
         }
     }
-  return 0;
+  return static_cast<struct HeaderGperfEntry *> (0);
 }
-#line 31 "header.gperf"
+#line 36 "header.gperf"
 

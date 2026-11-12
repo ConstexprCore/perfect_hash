@@ -1,4 +1,4 @@
-/* C++ code produced by gperf version 3.1 */
+/* C++ code produced by gperf version 3.3 */
 /* Command-line: gperf letters26.gperf  */
 /* Computed positions: -k'1' */
 
@@ -32,6 +32,12 @@
 #line 1 "letters26.gperf"
 
 #include <cstring>
+/* A map, like the other benchmark methods: the value is the declaration index.
+   %compare-lengths: lengths first, then memcmp: faster than strncmp on this set's long or
+   similar keys.
+   Regenerate with regenerate.sh. */
+#line 15 "letters26.gperf"
+struct Letters26GperfEntry { const char *name; int value; };
 /* maximum key range = 32, duplicates = 0 */
 
 class Letters26Gperf
@@ -39,7 +45,7 @@ class Letters26Gperf
 private:
   static inline unsigned int hash (const char *str, size_t len);
 public:
-  static const char *lookup (const char *str, size_t len);
+  static const struct Letters26GperfEntry *lookup (const char *str, size_t len);
 };
 
 inline /*ARGSUSED*/
@@ -75,10 +81,11 @@ Letters26Gperf::hash (const char *str, size_t len)
       32, 32, 32, 32, 32, 32, 32, 32, 32, 32,
       32, 32, 32, 32, 32, 32
     };
+  (void) len;
   return asso_values[static_cast<unsigned char>(str[0])];
 }
 
-const char *
+const struct Letters26GperfEntry *
 Letters26Gperf::lookup (const char *str, size_t len)
 {
   enum
@@ -90,55 +97,95 @@ Letters26Gperf::lookup (const char *str, size_t len)
       MAX_HASH_VALUE = 31
     };
 
-  static const char * const wordlist[] =
+  static const unsigned char lengthtable[] =
     {
-      "z",
-      "m",
-      "",
-      "s",
-      "f",
-      "y",
-      "l",
-      "",
-      "r",
-      "e",
-      "x",
-      "k",
-      "",
-      "q",
-      "d",
-      "w",
-      "j",
-      "",
-      "p",
-      "c",
-      "v",
-      "i",
-      "",
-      "o",
-      "b",
-      "u",
-      "h",
-      "",
-      "n",
-      "a",
-      "t",
-      "g"
+       1,  1,  0,  1,  1,  1,  1,  0,  1,  1,  1,  1,  0,  1,
+       1,  1,  1,  0,  1,  1,  1,  1,  0,  1,  1,  1,  1,  0,
+       1,  1,  1,  1
     };
+#if (defined __GNUC__ && __GNUC__ + (__GNUC_MINOR__ >= 6) > 4) || (defined __clang__ && __clang_major__ >= 3)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#endif
+  static const struct Letters26GperfEntry wordlist[] =
+    {
+#line 42 "letters26.gperf"
+      {"z", 25},
+#line 29 "letters26.gperf"
+      {"m", 12},
+      {""},
+#line 35 "letters26.gperf"
+      {"s", 18},
+#line 22 "letters26.gperf"
+      {"f", 5},
+#line 41 "letters26.gperf"
+      {"y", 24},
+#line 28 "letters26.gperf"
+      {"l", 11},
+      {""},
+#line 34 "letters26.gperf"
+      {"r", 17},
+#line 21 "letters26.gperf"
+      {"e", 4},
+#line 40 "letters26.gperf"
+      {"x", 23},
+#line 27 "letters26.gperf"
+      {"k", 10},
+      {""},
+#line 33 "letters26.gperf"
+      {"q", 16},
+#line 20 "letters26.gperf"
+      {"d", 3},
+#line 39 "letters26.gperf"
+      {"w", 22},
+#line 26 "letters26.gperf"
+      {"j", 9},
+      {""},
+#line 32 "letters26.gperf"
+      {"p", 15},
+#line 19 "letters26.gperf"
+      {"c", 2},
+#line 38 "letters26.gperf"
+      {"v", 21},
+#line 25 "letters26.gperf"
+      {"i", 8},
+      {""},
+#line 31 "letters26.gperf"
+      {"o", 14},
+#line 18 "letters26.gperf"
+      {"b", 1},
+#line 37 "letters26.gperf"
+      {"u", 20},
+#line 24 "letters26.gperf"
+      {"h", 7},
+      {""},
+#line 30 "letters26.gperf"
+      {"n", 13},
+#line 17 "letters26.gperf"
+      {"a", 0},
+#line 36 "letters26.gperf"
+      {"t", 19},
+#line 23 "letters26.gperf"
+      {"g", 6}
+    };
+#if (defined __GNUC__ && __GNUC__ + (__GNUC_MINOR__ >= 6) > 4) || (defined __clang__ && __clang_major__ >= 3)
+#pragma GCC diagnostic pop
+#endif
 
   if (len <= MAX_WORD_LENGTH && len >= MIN_WORD_LENGTH)
     {
       unsigned int key = hash (str, len);
 
       if (key <= MAX_HASH_VALUE)
-        {
-          const char *s = wordlist[key];
+        if (len == lengthtable[key])
+          {
+            const char *s = wordlist[key].name;
 
-          if (*str == *s && !strncmp (str + 1, s + 1, len - 1) && s[len] == '\0')
-            return s;
-        }
+            if (*str == *s && !memcmp (str + 1, s + 1, len - 1))
+              return &wordlist[key];
+          }
     }
-  return 0;
+  return static_cast<struct Letters26GperfEntry *> (0);
 }
-#line 37 "letters26.gperf"
+#line 43 "letters26.gperf"
 

@@ -1,111 +1,116 @@
 %{
 #include <cstring>
+/* A map, like the other benchmark methods: the value is the declaration index.
+   %compare-strncmp: strncmp without a length table: faster on this set's short keys.
+   Regenerate with regenerate.sh. */
 %}
 %language=C++
 %define class-name StockGperf
 %define lookup-function-name lookup
+%struct-type
 %readonly-tables
 %enum
 %compare-strncmp
+struct StockGperfEntry { const char *name; int value; };
 %%
-AAPL
-ABBV
-ABT
-ACN
-ADBE
-AIG
-AMD
-AMGN
-AMT
-AMZN
-AVGO
-AXP
-BA
-BAC
-BK
-BKNG
-BLK
-BMY
-C
-CAT
-CHTR
-CL
-CMCSA
-COF
-COP
-COST
-CRM
-CSCO
-CVS
-CVX
-DE
-DHR
-DIS
-DOW
-DUK
-EMR
-EXC
-F
-FDX
-GD
-GE
-GILD
-GM
-GOOG
-GS
-HD
-HON
-IBM
-INTC
-INTU
-ISRG
-JNJ
-JPM
-KHC
-KO
-LIN
-LLY
-LMT
-LOW
-MA
-MCD
-MDLZ
-MDT
-MET
-META
-MMM
-MO
-MRK
-MS
-MSFT
-NEE
-NFLX
-NKE
-NVDA
-ORCL
-PEP
-PFE
-PG
-PM
-PYPL
-QCOM
-RTX
-SBUX
-SCHW
-SO
-SPG
-T
-TGT
-TMO
-TMUS
-TSLA
-TXN
-UNH
-UNP
-UPS
-USB
-V
-VZ
-WFC
-WMT
+AAPL, 0
+ABBV, 1
+ABT, 2
+ACN, 3
+ADBE, 4
+AIG, 5
+AMD, 6
+AMGN, 7
+AMT, 8
+AMZN, 9
+AVGO, 10
+AXP, 11
+BA, 12
+BAC, 13
+BK, 14
+BKNG, 15
+BLK, 16
+BMY, 17
+C, 18
+CAT, 19
+CHTR, 20
+CL, 21
+CMCSA, 22
+COF, 23
+COP, 24
+COST, 25
+CRM, 26
+CSCO, 27
+CVS, 28
+CVX, 29
+DE, 30
+DHR, 31
+DIS, 32
+DOW, 33
+DUK, 34
+EMR, 35
+EXC, 36
+F, 37
+FDX, 38
+GD, 39
+GE, 40
+GILD, 41
+GM, 42
+GOOG, 43
+GS, 44
+HD, 45
+HON, 46
+IBM, 47
+INTC, 48
+INTU, 49
+ISRG, 50
+JNJ, 51
+JPM, 52
+KHC, 53
+KO, 54
+LIN, 55
+LLY, 56
+LMT, 57
+LOW, 58
+MA, 59
+MCD, 60
+MDLZ, 61
+MDT, 62
+MET, 63
+META, 64
+MMM, 65
+MO, 66
+MRK, 67
+MS, 68
+MSFT, 69
+NEE, 70
+NFLX, 71
+NKE, 72
+NVDA, 73
+ORCL, 74
+PEP, 75
+PFE, 76
+PG, 77
+PM, 78
+PYPL, 79
+QCOM, 80
+RTX, 81
+SBUX, 82
+SCHW, 83
+SO, 84
+SPG, 85
+T, 86
+TGT, 87
+TMO, 88
+TMUS, 89
+TSLA, 90
+TXN, 91
+UNH, 92
+UNP, 93
+UPS, 94
+USB, 95
+V, 96
+VZ, 97
+WFC, 98
+WMT, 99
 %%

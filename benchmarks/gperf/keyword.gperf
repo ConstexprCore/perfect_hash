@@ -1,26 +1,31 @@
 %{
 #include <cstring>
+/* A map, like the other benchmark methods: the value is the declaration index.
+   %compare-strncmp: strncmp without a length table: faster on this set's short keys.
+   Regenerate with regenerate.sh. */
 %}
 %language=C++
 %define class-name KeywordGperf
 %define lookup-function-name lookup
+%struct-type
 %readonly-tables
 %enum
 %compare-strncmp
+struct KeywordGperfEntry { const char *name; int value; };
 %%
-auto
-bool
-break
-case
-char
-class
-const
-do
-double
-else
-enum
-float
-for
-goto
-if
+auto, 0
+bool, 1
+break, 2
+case, 3
+char, 4
+class, 5
+const, 6
+do, 7
+double, 8
+else, 9
+enum, 10
+float, 11
+for, 12
+goto, 13
+if, 14
 %%

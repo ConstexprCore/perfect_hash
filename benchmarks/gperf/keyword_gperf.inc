@@ -1,5 +1,5 @@
-/* C++ code produced by gperf version 3.0.3 */
-/* Command-line: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/gperf keyword.gperf  */
+/* C++ code produced by gperf version 3.3 */
+/* Command-line: gperf keyword.gperf  */
 /* Computed positions: -k'1-2' */
 
 #if !((' ' == 32) && ('!' == 33) && ('"' == 34) && ('#' == 35) \
@@ -26,24 +26,29 @@
       && ('w' == 119) && ('x' == 120) && ('y' == 121) && ('z' == 122) \
       && ('{' == 123) && ('|' == 124) && ('}' == 125) && ('~' == 126))
 /* The character set is not based on ISO-646.  */
-#error "gperf generated tables don't work with this execution character set. Please report a bug to <bug-gnu-gperf@gnu.org>."
+#error "gperf generated tables don't work with this execution character set. Please report a bug to <bug-gperf@gnu.org>."
 #endif
 
 #line 1 "keyword.gperf"
 
 #include <cstring>
+/* A map, like the other benchmark methods: the value is the declaration index.
+   %compare-strncmp: strncmp without a length table: faster on this set's short keys.
+   Regenerate with regenerate.sh. */
+#line 14 "keyword.gperf"
+struct KeywordGperfEntry { const char *name; int value; };
 /* maximum key range = 28, duplicates = 0 */
 
 class KeywordGperf
 {
 private:
-  static inline unsigned int hash (const char *str, unsigned int len);
+  static inline unsigned int hash (const char *str, size_t len);
 public:
-  static const char *lookup (const char *str, unsigned int len);
+  static const struct KeywordGperfEntry *lookup (const char *str, size_t len);
 };
 
 inline unsigned int
-KeywordGperf::hash (const char *str, unsigned int len)
+KeywordGperf::hash (const char *str, size_t len)
 {
   static const unsigned char asso_values[] =
     {
@@ -74,11 +79,11 @@ KeywordGperf::hash (const char *str, unsigned int len)
       30, 30, 30, 30, 30, 30, 30, 30, 30, 30,
       30, 30, 30, 30, 30, 30
     };
-  return len + asso_values[(unsigned char)str[1]] + asso_values[(unsigned char)str[0]];
+  return len + asso_values[static_cast<unsigned char>(str[1])] + asso_values[static_cast<unsigned char>(str[0])];
 }
 
-const char *
-KeywordGperf::lookup (const char *str, unsigned int len)
+const struct KeywordGperfEntry *
+KeywordGperf::lookup (const char *str, size_t len)
 {
   enum
     {
@@ -89,30 +94,52 @@ KeywordGperf::lookup (const char *str, unsigned int len)
       MAX_HASH_VALUE = 29
     };
 
-  static const char * const wordlist[] =
+#if (defined __GNUC__ && __GNUC__ + (__GNUC_MINOR__ >= 6) > 4) || (defined __clang__ && __clang_major__ >= 3)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#endif
+  static const struct KeywordGperfEntry wordlist[] =
     {
-      "", "",
-      "do",
-      "for",
-      "auto",
-      "",
-      "double",
-      "if",
-      "goto",
-      "bool",
-      "float",
-      "", "", "",
-      "case",
-      "const",
-      "", "", "",
-      "else",
-      "class",
-      "", "", "",
-      "enum",
-      "break",
-      "", "", "",
-      "char"
+      {""}, {""},
+#line 23 "keyword.gperf"
+      {"do", 7},
+#line 28 "keyword.gperf"
+      {"for", 12},
+#line 16 "keyword.gperf"
+      {"auto", 0},
+      {""},
+#line 24 "keyword.gperf"
+      {"double", 8},
+#line 30 "keyword.gperf"
+      {"if", 14},
+#line 29 "keyword.gperf"
+      {"goto", 13},
+#line 17 "keyword.gperf"
+      {"bool", 1},
+#line 27 "keyword.gperf"
+      {"float", 11},
+      {""}, {""}, {""},
+#line 19 "keyword.gperf"
+      {"case", 3},
+#line 22 "keyword.gperf"
+      {"const", 6},
+      {""}, {""}, {""},
+#line 25 "keyword.gperf"
+      {"else", 9},
+#line 21 "keyword.gperf"
+      {"class", 5},
+      {""}, {""}, {""},
+#line 26 "keyword.gperf"
+      {"enum", 10},
+#line 18 "keyword.gperf"
+      {"break", 2},
+      {""}, {""}, {""},
+#line 20 "keyword.gperf"
+      {"char", 4}
     };
+#if (defined __GNUC__ && __GNUC__ + (__GNUC_MINOR__ >= 6) > 4) || (defined __clang__ && __clang_major__ >= 3)
+#pragma GCC diagnostic pop
+#endif
 
   if (len <= MAX_WORD_LENGTH && len >= MIN_WORD_LENGTH)
     {
@@ -120,13 +147,13 @@ KeywordGperf::lookup (const char *str, unsigned int len)
 
       if (key <= MAX_HASH_VALUE)
         {
-          const char *s = wordlist[key];
+          const char *s = wordlist[key].name;
 
           if (*str == *s && !strncmp (str + 1, s + 1, len - 1) && s[len] == '\0')
-            return s;
+            return &wordlist[key];
         }
     }
-  return 0;
+  return static_cast<struct KeywordGperfEntry *> (0);
 }
-#line 26 "keyword.gperf"
+#line 31 "keyword.gperf"
 
