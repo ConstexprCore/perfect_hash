@@ -1,0 +1,57 @@
+%{
+#include <cstring>
+/* A map, like the other benchmark methods: the value is the declaration index.
+   %compare-lengths: lengths first, then memcmp: faster than strncmp on this set's long or
+   similar keys.
+   Regenerate with regenerate.sh. */
+%}
+%language=C++
+%define class-name FqcnGperf
+%define lookup-function-name lookup
+%struct-type
+%readonly-tables
+%enum
+%compare-lengths
+struct FqcnGperfEntry { const char *name; int value; };
+%%
+java.util.concurrent.ConcurrentHashMap, 0
+java.util.concurrent.ConcurrentLinkedQueue, 1
+java.util.concurrent.CopyOnWriteArrayList, 2
+java.util.concurrent.atomic.AtomicInteger, 3
+java.util.concurrent.atomic.AtomicLongArray, 4
+java.util.concurrent.locks.ReentrantReadWriteLock, 5
+java.util.concurrent.ScheduledThreadPoolExecutor, 6
+java.util.concurrent.CompletableFuture, 7
+java.util.concurrent.ThreadPoolExecutor, 8
+java.util.concurrent.LinkedBlockingQueue, 9
+java.util.function.BiFunction, 10
+java.util.function.ToLongFunction, 11
+java.util.stream.Collectors, 12
+java.util.stream.IntStream, 13
+java.util.regex.PatternSyntaxException, 14
+java.lang.reflect.InvocationTargetException, 15
+java.lang.reflect.ParameterizedType, 16
+java.lang.invoke.MethodHandles, 17
+java.lang.ref.WeakReference, 18
+java.io.ByteArrayOutputStream, 19
+java.io.ObjectInputStream, 20
+java.nio.channels.AsynchronousSocketChannel, 21
+java.nio.charset.StandardCharsets, 22
+java.nio.file.attribute.BasicFileAttributes, 23
+java.net.http.HttpClient, 24
+java.security.MessageDigest, 25
+java.security.spec.PKCS8EncodedKeySpec, 26
+java.time.format.DateTimeFormatter, 27
+java.time.temporal.ChronoUnit, 28
+javax.crypto.spec.SecretKeySpec, 29
+org.apache.commons.lang3.StringUtils, 30
+org.apache.commons.collections4.MultiValuedMap, 31
+org.springframework.context.ApplicationContext, 32
+org.springframework.web.bind.annotation.RequestMapping, 33
+org.springframework.beans.factory.annotation.Autowired, 34
+com.fasterxml.jackson.databind.ObjectMapper, 35
+com.fasterxml.jackson.annotation.JsonProperty, 36
+com.google.common.collect.ImmutableList, 37
+com.google.common.util.concurrent.ListenableFuture, 38
+io.netty.channel.socket.nio.NioSocketChannel, 39
+%%

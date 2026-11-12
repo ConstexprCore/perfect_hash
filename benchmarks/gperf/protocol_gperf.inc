@@ -1,5 +1,5 @@
-/* C++ code produced by gperf version 3.0.3 */
-/* Command-line: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/gperf protocol.gperf  */
+/* C++ code produced by gperf version 3.3 */
+/* Command-line: gperf protocol.gperf  */
 /* Computed positions: -k'1' */
 
 #if !((' ' == 32) && ('!' == 33) && ('"' == 34) && ('#' == 35) \
@@ -26,59 +26,64 @@
       && ('w' == 119) && ('x' == 120) && ('y' == 121) && ('z' == 122) \
       && ('{' == 123) && ('|' == 124) && ('}' == 125) && ('~' == 126))
 /* The character set is not based on ISO-646.  */
-#error "gperf generated tables don't work with this execution character set. Please report a bug to <bug-gnu-gperf@gnu.org>."
+#error "gperf generated tables don't work with this execution character set. Please report a bug to <bug-gperf@gnu.org>."
 #endif
 
 #line 1 "protocol.gperf"
 
 #include <cstring>
+/* A map, like the other benchmark methods: the value is the declaration index.
+   %compare-strncmp: strncmp without a length table: faster on this set's short keys.
+   Regenerate with regenerate.sh. */
+#line 14 "protocol.gperf"
+struct ProtocolGperfEntry { const char *name; int value; };
 /* maximum key range = 8, duplicates = 0 */
 
 class ProtocolGperf
 {
 private:
-  static inline unsigned int hash (const char *str, unsigned int len);
+  static inline unsigned int hash (const char *str, size_t len);
 public:
-  static const char *lookup (const char *str, unsigned int len);
+  static const struct ProtocolGperfEntry *lookup (const char *str, size_t len);
 };
 
 inline unsigned int
-ProtocolGperf::hash (const char *str, unsigned int len)
+ProtocolGperf::hash (const char *str, size_t len)
 {
   static const unsigned char asso_values[] =
     {
-     10,10,10,10,10,10,10,10,10,10,
-     10,10,10,10,10,10,10,10,10,10,
-     10,10,10,10,10,10,10,10,10,10,
-     10,10,10,10,10,10,10,10,10,10,
-     10,10,10,10,10,10,10,10,10,10,
-     10,10,10,10,10,10,10,10,10,10,
-     10,10,10,10,10,10,10,10,10,10,
-     10,10,10,10,10,10,10,10,10,10,
-     10,10,10,10,10,10,10,10,10,10,
-     10,10,10,10,10,10,10,10,10,10,
-     10,10, 5,10, 0,10,10,10,10,10,
-     10,10,10,10,10,10,10,10,10, 0,
-     10,10,10,10,10,10,10,10,10,10,
-     10,10,10,10,10,10,10,10,10,10,
-     10,10,10,10,10,10,10,10,10,10,
-     10,10,10,10,10,10,10,10,10,10,
-     10,10,10,10,10,10,10,10,10,10,
-     10,10,10,10,10,10,10,10,10,10,
-     10,10,10,10,10,10,10,10,10,10,
-     10,10,10,10,10,10,10,10,10,10,
-     10,10,10,10,10,10,10,10,10,10,
-     10,10,10,10,10,10,10,10,10,10,
-     10,10,10,10,10,10,10,10,10,10,
-     10,10,10,10,10,10,10,10,10,10,
-     10,10,10,10,10,10,10,10,10,10,
-     10,10,10,10,10,10
+      10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+      10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+      10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+      10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+      10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+      10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+      10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+      10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+      10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+      10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+      10, 10,  5, 10,  0, 10, 10, 10, 10, 10,
+      10, 10, 10, 10, 10, 10, 10, 10, 10,  0,
+      10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+      10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+      10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+      10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+      10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+      10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+      10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+      10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+      10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+      10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+      10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+      10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+      10, 10, 10, 10, 10, 10, 10, 10, 10, 10,
+      10, 10, 10, 10, 10, 10
     };
-  return len + asso_values[(unsigned char)str[0]];
+  return len + asso_values[static_cast<unsigned char>(str[0])];
 }
 
-const char *
-ProtocolGperf::lookup (const char *str, unsigned int len)
+const struct ProtocolGperfEntry *
+ProtocolGperf::lookup (const char *str, size_t len)
 {
   enum
     {
@@ -89,17 +94,30 @@ ProtocolGperf::lookup (const char *str, unsigned int len)
       MAX_HASH_VALUE = 9
     };
 
-  static const char * const wordlist[] =
+#if (defined __GNUC__ && __GNUC__ + (__GNUC_MINOR__ >= 6) > 4) || (defined __clang__ && __clang_major__ >= 3)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#endif
+  static const struct ProtocolGperfEntry wordlist[] =
     {
-      "", "",
-      "ws",
-      "wss",
-      "http",
-      "https",
-      "", "",
-      "ftp",
-      "file"
+      {""}, {""},
+#line 19 "protocol.gperf"
+      {"ws", 3},
+#line 20 "protocol.gperf"
+      {"wss", 4},
+#line 16 "protocol.gperf"
+      {"http", 0},
+#line 17 "protocol.gperf"
+      {"https", 1},
+      {""}, {""},
+#line 18 "protocol.gperf"
+      {"ftp", 2},
+#line 21 "protocol.gperf"
+      {"file", 5}
     };
+#if (defined __GNUC__ && __GNUC__ + (__GNUC_MINOR__ >= 6) > 4) || (defined __clang__ && __clang_major__ >= 3)
+#pragma GCC diagnostic pop
+#endif
 
   if (len <= MAX_WORD_LENGTH && len >= MIN_WORD_LENGTH)
     {
@@ -107,13 +125,13 @@ ProtocolGperf::lookup (const char *str, unsigned int len)
 
       if (key <= MAX_HASH_VALUE)
         {
-          const char *s = wordlist[key];
+          const char *s = wordlist[key].name;
 
           if (*str == *s && !strncmp (str + 1, s + 1, len - 1) && s[len] == '\0')
-            return s;
+            return &wordlist[key];
         }
     }
-  return 0;
+  return static_cast<struct ProtocolGperfEntry *> (0);
 }
-#line 17 "protocol.gperf"
+#line 22 "protocol.gperf"
 

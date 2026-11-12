@@ -1,26 +1,32 @@
 %{
 #include <cstring>
+/* A map, like the other benchmark methods: the value is the declaration index.
+   %compare-lengths: lengths first, then memcmp: faster than strncmp on this set's long or
+   similar keys.
+   Regenerate with regenerate.sh. */
 %}
 %language=C++
 %define class-name MimeGperf
 %define lookup-function-name lookup
+%struct-type
 %readonly-tables
 %enum
-%compare-strncmp
+%compare-lengths
+struct MimeGperfEntry { const char *name; int value; };
 %%
-text/html
-text/plain
-text/css
-application/json
-application/xml
-application/pdf
-application/zip
-image/png
-image/jpeg
-image/gif
-image/webp
-audio/mpeg
-video/mp4
-font/woff2
-font/woff
+text/html, 0
+text/plain, 1
+text/css, 2
+application/json, 3
+application/xml, 4
+application/pdf, 5
+application/zip, 6
+image/png, 7
+image/jpeg, 8
+image/gif, 9
+image/webp, 10
+audio/mpeg, 11
+video/mp4, 12
+font/woff2, 13
+font/woff, 14
 %%

@@ -1,0 +1,66 @@
+%{
+#include <cstring>
+/* A map, like the other benchmark methods: the value is the declaration index.
+   %compare-strncmp: strncmp without a length table: faster on this set's short keys.
+   Regenerate with regenerate.sh. */
+%}
+%language=C++
+%define class-name HttpHeaders50Gperf
+%define lookup-function-name lookup
+%struct-type
+%readonly-tables
+%enum
+%compare-strncmp
+struct HttpHeaders50GperfEntry { const char *name; int value; };
+%%
+Accept, 0
+Accept-Charset, 1
+Accept-Encoding, 2
+Accept-Language, 3
+Accept-Ranges, 4
+Age, 5
+Allow, 6
+Authorization, 7
+Cache-Control, 8
+Connection, 9
+Content-Encoding, 10
+Content-Language, 11
+Content-Length, 12
+Content-Location, 13
+Content-Type, 14
+Cookie, 15
+Date, 16
+ETag, 17
+Expect, 18
+Expires, 19
+From, 20
+Host, 21
+If-Match, 22
+If-Modified-Since, 23
+If-None-Match, 24
+If-Range, 25
+If-Unmodified-Since, 26
+Keep-Alive, 27
+Last-Modified, 28
+Location, 29
+Max-Forwards, 30
+Origin, 31
+Pragma, 32
+Proxy-Authenticate, 33
+Proxy-Authorization, 34
+Range, 35
+Referer, 36
+Retry-After, 37
+Server, 38
+Set-Cookie, 39
+TE, 40
+Trailer, 41
+Transfer-Encoding, 42
+Upgrade, 43
+User-Agent, 44
+Vary, 45
+Via, 46
+WWW-Authenticate, 47
+Warning, 48
+X-Forwarded-For, 49
+%%
