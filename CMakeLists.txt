@@ -28,10 +28,14 @@ include(FetchContent)
 
 set(UA_BUILD_TESTS OFF CACHE BOOL "" FORCE)
 
+# Pinned to a release so every perfect_hash tag keeps building the same code;
+# a moving branch would change what old releases fetch. Keep in sync with
+# DEPENDENCY_REF in singleheader/amalgamate.py.
 FetchContent_Declare(
     useful_abstractions
     GIT_REPOSITORY https://github.com/ConstexprCore/useful_abstractions.git
-    GIT_TAG        master
+    GIT_TAG        v0.1.0
+    GIT_SHALLOW    TRUE
 )
 FetchContent_MakeAvailable(useful_abstractions)
 
