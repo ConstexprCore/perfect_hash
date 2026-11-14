@@ -156,15 +156,15 @@ void pretty_print(const std::string &name, size_t num_values,
 using benchx::build_input;
 
 // Generic benchmark: runs PHF, naive, and unordered_map on a given input vector.
-template <typename PHFMap, typename NaiveFn, typename FrozenMap, typename KronuzPHF, typename GperfFn>
+// The compile-time structures are template parameters so that the compiler
+// always sees them as constants, as it would for a global map; passed by
+// reference, that depends on its cloning heuristics.
+template <const auto &phf_map, auto naive_fn, const auto &frozen_map, const auto &kronuz_phf,
+          typename GperfFn>
 void bench_workload(const std::string &label,
                     std::vector<std::string_view> &input,
                     size_t num_strings,
-                    const PHFMap &phf_map,
-                    NaiveFn naive_fn,
                     const std::unordered_map<std::string_view, int> &uset,
-                    const FrozenMap &frozen_map,
-                    const KronuzPHF &kronuz_phf,
                     GperfFn gperf_fn,
                     const BenchFilter &filter,
                     bool describe) {
@@ -323,12 +323,9 @@ void bench_pthash(const std::string &label,
 }
 
 // Run a full key-set benchmark with all three workload modes.
-template <typename PHFMap, typename NaiveFn, typename FrozenMap, typename KronuzPHF, typename GperfFn>
+template <const auto &phf_map, auto naive_fn, const auto &frozen_map, const auto &kronuz_phf,
+          typename GperfFn>
 void run_keyset(const std::string &name,
-                const PHFMap &phf_map,
-                NaiveFn naive_fn,
-                const FrozenMap &frozen_map,
-                const KronuzPHF &kronuz_phf,
                 GperfFn gperf_fn,
                 const std::vector<std::string_view> &hit_keys,
                 const std::vector<std::string_view> &miss_keys,
@@ -359,17 +356,17 @@ void run_keyset(const std::string &name,
 
   if (filter.run_workload("hits")) {
     std::println("  --- all hits ---");
-    bench_workload("hits  ", hits, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, gperf_fn, filter, describe);
+    bench_workload<phf_map, naive_fn, frozen_map, kronuz_phf>("hits  ", hits, num_strings, uset, gperf_fn, filter, describe);
     bench_pthash("hits  ", hits, num_strings, pthash_phf, filter);
   }
   if (filter.run_workload("misses")) {
     std::println("  --- all misses ---");
-    bench_workload("misses", misses, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, gperf_fn, filter, describe);
+    bench_workload<phf_map, naive_fn, frozen_map, kronuz_phf>("misses", misses, num_strings, uset, gperf_fn, filter, describe);
     bench_pthash("misses", misses, num_strings, pthash_phf, filter);
   }
   if (filter.run_workload("mixed")) {
     std::println("  --- mixed (hits + misses pool) ---");
-    bench_workload("mixed ", mixed, num_strings, phf_map, naive_fn, uset, frozen_map, kronuz_phf, gperf_fn, filter, describe);
+    bench_workload<phf_map, naive_fn, frozen_map, kronuz_phf>("mixed ", mixed, num_strings, uset, gperf_fn, filter, describe);
     bench_pthash("mixed ", mixed, num_strings, pthash_phf, filter);
   }
 }
@@ -1342,7 +1339,7 @@ int main(int argc, char *argv[]) {
 
   // --- URL Protocols (6 keys, short) ---
   if (filter.run_keyset("protocol")) {
-    run_keyset("URL Protocols", protocol_phf, protocol_naive, protocol_frozen, protocol_kronuz, gperf_protocol,
+    run_keyset<protocol_phf, protocol_naive, protocol_frozen, protocol_kronuz>("URL Protocols", gperf_protocol,
       {"http","https","ftp","ws","wss","file"},
       {"ssh","telnet","mailto","data","blob","urn"},
       filter, describe);
@@ -1350,7 +1347,7 @@ int main(int argc, char *argv[]) {
 
   // --- S&P 100 Stock Tickers (100 keys, short) ---
   if (filter.run_keyset("stock")) {
-    run_keyset("S&P 100 Tickers", ticker_phf, ticker_naive, ticker_frozen, ticker_kronuz, gperf_stock,
+    run_keyset<ticker_phf, ticker_naive, ticker_frozen, ticker_kronuz>("S&P 100 Tickers", gperf_stock,
       {"AAPL","ABBV","ABT","ACN","ADBE","AIG","AMD","AMGN","AMT","AMZN",
        "AVGO","AXP","BA","BAC","BK","BKNG","BLK","BMY","C","CAT",
        "CHTR","CL","CMCSA","COF","COP","COST","CRM","CSCO","CVS","CVX",
@@ -1368,7 +1365,7 @@ int main(int argc, char *argv[]) {
 
   // --- C++ Keywords (15 keys, short-medium) ---
   if (filter.run_keyset("keyword")) {
-    run_keyset("C++ Keywords", keyword_phf, keyword_naive, keyword_frozen, keyword_kronuz, gperf_keyword,
+    run_keyset<keyword_phf, keyword_naive, keyword_frozen, keyword_kronuz>("C++ Keywords", gperf_keyword,
       {"auto","bool","break","case","char","class","const",
        "do","double","else","enum","float","for","goto","if"},
       {"int","void","return","while","switch","struct","static",
@@ -1378,7 +1375,7 @@ int main(int argc, char *argv[]) {
 
   // --- HTTP Headers (20 keys, long) ---
   if (filter.run_keyset("header")) {
-    run_keyset("HTTP Headers", header_phf, header_naive, header_frozen, header_kronuz, gperf_header,
+    run_keyset<header_phf, header_naive, header_frozen, header_kronuz>("HTTP Headers", gperf_header,
       {"Accept","Accept-Encoding","Authorization","Cache-Control",
        "Connection","Content-Length","Content-Type","Cookie",
        "Date","Host","If-None-Match","Location","Origin","Referer",
@@ -1391,7 +1388,7 @@ int main(int argc, char *argv[]) {
 
   // --- MIME Types (15 keys, long) ---
   if (filter.run_keyset("mime")) {
-    run_keyset("MIME Types", mime_phf, mime_naive, mime_frozen, mime_kronuz, gperf_mime,
+    run_keyset<mime_phf, mime_naive, mime_frozen, mime_kronuz>("MIME Types", gperf_mime,
       {"text/html","text/plain","text/css","application/json",
        "application/xml","application/pdf","application/zip",
        "image/png","image/jpeg","image/gif","image/webp",
@@ -1404,7 +1401,7 @@ int main(int argc, char *argv[]) {
 
   // --- Letters a-z (26 keys, uniform single-char) ---
   if (filter.run_keyset("letters")) {
-    run_keyset("Letters a-z", letters_phf, letters_naive, letters_frozen, letters_kronuz, gperf_letters,
+    run_keyset<letters_phf, letters_naive, letters_frozen, letters_kronuz>("Letters a-z", gperf_letters,
       {"a","b","c","d","e","f","g","h","i","j","k","l","m",
        "n","o","p","q","r","s","t","u","v","w","x","y","z"},
       {"A","B","1","!","aa","zz","0","ab","yz","mn",
@@ -1414,7 +1411,7 @@ int main(int argc, char *argv[]) {
 
   // --- HTTP Headers 50 (50 keys, long, large realistic set) ---
   if (filter.run_keyset("headers50")) {
-    run_keyset("HTTP Headers 50", headers50_phf, headers50_naive, headers50_frozen, headers50_kronuz, gperf_headers50,
+    run_keyset<headers50_phf, headers50_naive, headers50_frozen, headers50_kronuz>("HTTP Headers 50", gperf_headers50,
       {"Accept","Accept-Charset","Accept-Encoding","Accept-Language",
        "Accept-Ranges","Age","Allow","Authorization",
        "Cache-Control","Connection","Content-Encoding","Content-Language",
@@ -1436,7 +1433,7 @@ int main(int argc, char *argv[]) {
 
   // --- JavaScript Reserved Words (45 keys, medium) ---
   if (filter.run_keyset("jsreserved")) {
-    run_keyset("JavaScript Reserved Words", jsreserved_phf, jsreserved_naive, jsreserved_frozen, jsreserved_kronuz, gperf_jsreserved_fn,
+    run_keyset<jsreserved_phf, jsreserved_naive, jsreserved_frozen, jsreserved_kronuz>("JavaScript Reserved Words", gperf_jsreserved_fn,
       {"await","break","case","catch","class","const","continue","debugger","default","delete",
        "do","else","enum","export","extends","false","finally","for","function","if",
        "import","in","instanceof","new","null","return","super","switch","this","throw",
@@ -1449,7 +1446,7 @@ int main(int argc, char *argv[]) {
 
   // --- Counters (10 keys, snake_case telemetry fields) ---
   if (filter.run_keyset("counters")) {
-    run_keyset("Counters", counters_phf, counters_naive, counters_frozen, counters_kronuz, gperf_counters_fn,
+    run_keyset<counters_phf, counters_naive, counters_frozen, counters_kronuz>("Counters", gperf_counters_fn,
       {"total_items","successful_operations","failed_operations","warnings","errors",
        "retries","bytes_processed","records_read","records_matched","records_written"},
       {"records_validated","total_bytes","processed_bytes","failed_requests","invalid_records",
@@ -1459,7 +1456,7 @@ int main(int argc, char *argv[]) {
 
   // --- Java FQCNs (40 keys, 24-54 chars: the > 32-byte compare path) ---
   if (filter.run_keyset("fqcn")) {
-    run_keyset("Java FQCNs", fqcn_phf, fqcn_naive, fqcn_frozen, fqcn_kronuz, gperf_fqcn_fn,
+    run_keyset<fqcn_phf, fqcn_naive, fqcn_frozen, fqcn_kronuz>("Java FQCNs", gperf_fqcn_fn,
       std::vector<std::string_view>(fqcn_keys.begin(), fqcn_keys.end()),
       std::vector<std::string_view>(fqcn_miss_keys.begin(), fqcn_miss_keys.end()),
       filter, describe);
