@@ -147,9 +147,10 @@ struct ArrayTrie {
 // ---------------------------------------------------------------------------
 // one key set
 // ---------------------------------------------------------------------------
-template <typename Wide, typename FrozenT, typename KronuzT, typename GperfFn>
-void run_keyset(const std::string& name, const Wide& wide, const FrozenT* frozen_map,
-                const KronuzT* kronuz_map, GperfFn gperf_fn,
+// The compile-time structures are template parameters so that the compiler
+// always sees them as constants (see bench_protocol.cpp).
+template <const auto& wide, const auto* frozen_map, const auto* kronuz_map, typename GperfFn>
+void run_keyset(const std::string& name, GperfFn gperf_fn,
                 const std::vector<std::string_view>& hits_pool,
                 const std::vector<std::string_view>& miss_pool,
                 const benchx::Filter& filter, bool describe, size_t num_strings = 200000) {
@@ -211,14 +212,16 @@ void run_keyset(const std::string& name, const Wide& wide, const FrozenT* frozen
     if (filter.method("u64_ankerl"))
       run_method(L + "u64 symbol -> ankerl::dense", input, [&](std::string_view s) -> std::optional<int> {
         auto it = dmap64.find(pack_symbol(s)); if (it != dmap64.end()) return it->second; return std::nullopt; });
-    if (filter.method("frozen") && frozen_map)
-      run_method(L + "frozen::unordered_map", input, [&](std::string_view s) -> std::optional<int> {
-        auto it = frozen_map->find(frozen::string(s.data(), s.size()));
-        if (it != frozen_map->end()) return it->second; return std::nullopt; });
-    if (filter.method("kronuz") && kronuz_map)
-      run_method(L + "kronuz::phf", input, [&](std::string_view s) -> std::optional<int> {
-        auto pos = kronuz_map->find(fnv1ah32::hash(s.data(), s.size()));
-        if (pos != phf::npos) return static_cast<int>(pos); return std::nullopt; });
+    if constexpr (frozen_map != nullptr)
+      if (filter.method("frozen"))
+        run_method(L + "frozen::unordered_map", input, [&](std::string_view s) -> std::optional<int> {
+          auto it = frozen_map->find(frozen::string(s.data(), s.size()));
+          if (it != frozen_map->end()) return it->second; return std::nullopt; });
+    if constexpr (kronuz_map != nullptr)
+      if (filter.method("kronuz"))
+        run_method(L + "kronuz::phf", input, [&](std::string_view s) -> std::optional<int> {
+          auto pos = kronuz_map->find(fnv1ah32::hash(s.data(), s.size()));
+          if (pos != phf::npos) return static_cast<int>(pos); return std::nullopt; });
     if (filter.method("gperf"))
       run_method(L + "gperf", input, gperf_fn);
     if (filter.method("pthash")) {
@@ -303,26 +306,26 @@ int main(int argc, char* argv[]) {
   }
 
 #if TICKERS_FROZEN_SP500
-  const auto* sp500_frozen_p = &sp500_frozen;
+  static constexpr const auto* sp500_frozen_p = &sp500_frozen;
 #else
-  const decltype(sp500_kronuz)* sp500_frozen_p = nullptr;   // placeholder type, never used
+  static constexpr const decltype(sp500_kronuz)* sp500_frozen_p = nullptr;   // placeholder type, never used
 #endif
 #if TICKERS_FROZEN_NASDAQ
-  const auto* nasdaq_frozen_p = &nasdaq_frozen;
+  static constexpr const auto* nasdaq_frozen_p = &nasdaq_frozen;
 #else
-  const decltype(sp500_kronuz)* nasdaq_frozen_p = nullptr;
+  static constexpr const decltype(sp500_kronuz)* nasdaq_frozen_p = nullptr;
 #endif
 #if TICKERS_KRONUZ_NASDAQ
-  const auto* nasdaq_kronuz_p = &nasdaq_kronuz;
+  static constexpr const auto* nasdaq_kronuz_p = &nasdaq_kronuz;
 #else
-  const decltype(sp500_kronuz)* nasdaq_kronuz_p = nullptr;
+  static constexpr const decltype(sp500_kronuz)* nasdaq_kronuz_p = nullptr;
 #endif
 
   if (filter.keyset("sp500"))
-    run_keyset("S&P 500 Tickers", sp500_wide, sp500_frozen_p, &sp500_kronuz, gperf_sp500_fn, sp500_hits,
+    run_keyset<sp500_wide, sp500_frozen_p, &sp500_kronuz>("S&P 500 Tickers", gperf_sp500_fn, sp500_hits,
                sp500_miss, filter, describe);
   if (filter.keyset("nasdaq"))
-    run_keyset("Nasdaq-listed Tickers", nasdaq_wide, nasdaq_frozen_p, nasdaq_kronuz_p, gperf_nasdaq_fn,
+    run_keyset<nasdaq_wide, nasdaq_frozen_p, nasdaq_kronuz_p>("Nasdaq-listed Tickers", gperf_nasdaq_fn,
                nasdaq_hits, nasdaq_miss, filter, describe);
   return 0;
 }
