@@ -155,7 +155,7 @@ you the same `#include` and the same code.
 plus the `fixed_string.h` dependency, in one file. Grab it and compile:
 
 ```bash
-curl -LO https://github.com/ConstexprCore/perfect_hash/releases/download/v0.4.2/perfect_hash.h
+curl -LO https://github.com/ConstexprCore/perfect_hash/releases/download/v0.5.0/perfect_hash.h
 ```
 
 Then just include it:
@@ -459,7 +459,7 @@ Each key set is tested with three query mixes (positive-only, negative-only, and
 - **`pthash`** — PTHash minimal perfect hash
 - **Naive** — if/else chain (binary search for the 100-key ticker set)
 
-The gperf `.inc` baselines are pre-generated from the `.gperf` input files in `benchmarks/` using `gperf <file>.gperf > <file>_gperf.inc`.
+The gperf `.inc` baselines are pre-generated from the `.gperf` inputs in `benchmarks/gperf/` (and the ticker sets in `benchmarks/data/`) by `benchmarks/gperf/regenerate.sh`. Each table is a map (`%struct-type`, value = declaration index), and each set uses whichever of `%compare-lengths` / `%compare-strncmp` is faster for it; see [benchmarks/gperf/README.md](benchmarks/gperf/README.md).
 
 
 ## How it works

@@ -1,56 +1,61 @@
 %{
 #include <cstring>
+/* A map, like the other benchmark methods: the value is the declaration index.
+   %compare-strncmp: strncmp without a length table: faster on this set's short keys.
+   Regenerate with regenerate.sh. */
 %}
 %language=C++
 %define class-name JsReservedGperf
 %define lookup-function-name lookup
+%struct-type
 %readonly-tables
 %enum
 %compare-strncmp
+struct JsReservedGperfEntry { const char *name; int value; };
 %%
-await
-break
-case
-catch
-class
-const
-continue
-debugger
-default
-delete
-do
-else
-enum
-export
-extends
-false
-finally
-for
-function
-if
-import
-in
-instanceof
-new
-null
-return
-super
-switch
-this
-throw
-true
-try
-typeof
-var
-void
-while
-with
-yield
-implements
-interface
-package
-private
-protected
-public
-static
+await, 0
+break, 1
+case, 2
+catch, 3
+class, 4
+const, 5
+continue, 6
+debugger, 7
+default, 8
+delete, 9
+do, 10
+else, 11
+enum, 12
+export, 13
+extends, 14
+false, 15
+finally, 16
+for, 17
+function, 18
+if, 19
+import, 20
+in, 21
+instanceof, 22
+new, 23
+null, 24
+return, 25
+super, 26
+switch, 27
+this, 28
+throw, 29
+true, 30
+try, 31
+typeof, 32
+var, 33
+void, 34
+while, 35
+with, 36
+yield, 37
+implements, 38
+interface, 39
+package, 40
+private, 41
+protected, 42
+public, 43
+static, 44
 %%

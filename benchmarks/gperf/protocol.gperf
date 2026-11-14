@@ -1,17 +1,22 @@
 %{
 #include <cstring>
+/* A map, like the other benchmark methods: the value is the declaration index.
+   %compare-strncmp: strncmp without a length table: faster on this set's short keys.
+   Regenerate with regenerate.sh. */
 %}
 %language=C++
 %define class-name ProtocolGperf
 %define lookup-function-name lookup
+%struct-type
 %readonly-tables
 %enum
 %compare-strncmp
+struct ProtocolGperfEntry { const char *name; int value; };
 %%
-http
-https
-ftp
-ws
-wss
-file
+http, 0
+https, 1
+ftp, 2
+ws, 3
+wss, 4
+file, 5
 %%

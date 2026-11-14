@@ -234,13 +234,20 @@ void run_keyset(const std::string& name, const Wide& wide, const FrozenT* frozen
   if (filter.workload("mixed"))  { std::println("  --- mixed (hits + misses pool) ---"); run("mixed ", mixed); }
 }
 
+// Gives a lookup callable the container interface verify() expects.
+template <typename F>
+struct as_lookup {
+  F f;
+  auto lookup(std::string_view s) const { return f(s); }
+};
+
 template <typename Wide>
 bool verify(const std::string& name, const Wide& wide, const std::vector<std::string_view>& hits,
             const std::vector<std::string_view>& misses) {
   bool ok = true;
   for (std::size_t i = 0; i < hits.size(); ++i) {
     auto v = wide.lookup(hits[i]);
-    if (!v || *v != i) { std::println(stderr, "  FAIL [{}]: hit '{}' -> {}", name, hits[i], v ? int(*v) : -1); ok = false; }
+    if (!v || static_cast<std::size_t>(*v) != i) { std::println(stderr, "  FAIL [{}]: hit '{}' -> {}", name, hits[i], v ? int(*v) : -1); ok = false; }
   }
   for (auto m : misses)
     if (wide.lookup(m)) { std::println(stderr, "  FAIL [{}]: false positive '{}'", name, m); ok = false; }
@@ -279,17 +286,19 @@ int main(int argc, char* argv[]) {
 
   auto gperf_sp500_fn = [](std::string_view s) -> std::optional<int> {
     auto r = gperf_sp500::Sp500Gperf::lookup(s.data(), s.size());
-    return r ? std::optional<int>(static_cast<int>(r[0])) : std::nullopt;
+    return r ? std::optional<int>(r->value) : std::nullopt;
   };
   auto gperf_nasdaq_fn = [](std::string_view s) -> std::optional<int> {
     auto r = gperf_nasdaq::NasdaqGperf::lookup(s.data(), s.size());
-    return r ? std::optional<int>(static_cast<int>(r[0])) : std::nullopt;
+    return r ? std::optional<int>(r->value) : std::nullopt;
   };
 
   if (do_verify) {
     bool ok = true;
     ok &= verify("S&P 500", sp500_wide, sp500_hits, sp500_miss);
     ok &= verify("Nasdaq", nasdaq_wide, nasdaq_hits, nasdaq_miss);
+    ok &= verify("S&P 500 gperf", as_lookup{gperf_sp500_fn}, sp500_hits, sp500_miss);
+    ok &= verify("Nasdaq gperf", as_lookup{gperf_nasdaq_fn}, nasdaq_hits, nasdaq_miss);
     return ok ? 0 : 1;
   }
 

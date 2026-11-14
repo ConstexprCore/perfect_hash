@@ -40,10 +40,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ── HTTPS credentials for private dependency: ConstexprCore/useful_abstractions ─
-      - name: Configure git credentials
-        run: git config --global url."https://x-access-token:${{ secrets.USEFUL_ABSTRACTIONS_PAT }}@github.com/".insteadOf "https://github.com/"
-
       # ── Linux: ensure requested compiler version is installed ─────────────
       - name: Install compiler (Linux)
         if: runner.os == 'Linux'
@@ -93,9 +89,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure git credentials
-        run: git config --global url."https://x-access-token:${{ secrets.USEFUL_ABSTRACTIONS_PAT }}@github.com/".insteadOf "https://github.com/"
-
       - name: Install Fil-C
         run: |
           sudo apt-get update -q
@@ -126,9 +119,6 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-
-      - name: Configure git credentials
-        run: git config --global url."https://x-access-token:${{ secrets.USEFUL_ABSTRACTIONS_PAT }}@github.com/".insteadOf "https://github.com/"
 
       - uses: actions/setup-python@v5
         with:

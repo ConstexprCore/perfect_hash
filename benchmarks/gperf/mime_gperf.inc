@@ -1,5 +1,5 @@
-/* C++ code produced by gperf version 3.0.3 */
-/* Command-line: /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/gperf mime.gperf  */
+/* C++ code produced by gperf version 3.3 */
+/* Command-line: gperf mime.gperf  */
 /* Computed positions: -k'7,13' */
 
 #if !((' ' == 32) && ('!' == 33) && ('"' == 34) && ('#' == 35) \
@@ -26,24 +26,30 @@
       && ('w' == 119) && ('x' == 120) && ('y' == 121) && ('z' == 122) \
       && ('{' == 123) && ('|' == 124) && ('}' == 125) && ('~' == 126))
 /* The character set is not based on ISO-646.  */
-#error "gperf generated tables don't work with this execution character set. Please report a bug to <bug-gnu-gperf@gnu.org>."
+#error "gperf generated tables don't work with this execution character set. Please report a bug to <bug-gperf@gnu.org>."
 #endif
 
 #line 1 "mime.gperf"
 
 #include <cstring>
+/* A map, like the other benchmark methods: the value is the declaration index.
+   %compare-lengths: lengths first, then memcmp: faster than strncmp on this set's long or
+   similar keys.
+   Regenerate with regenerate.sh. */
+#line 15 "mime.gperf"
+struct MimeGperfEntry { const char *name; int value; };
 /* maximum key range = 23, duplicates = 0 */
 
 class MimeGperf
 {
 private:
-  static inline unsigned int hash (const char *str, unsigned int len);
+  static inline unsigned int hash (const char *str, size_t len);
 public:
-  static const char *lookup (const char *str, unsigned int len);
+  static const struct MimeGperfEntry *lookup (const char *str, size_t len);
 };
 
 inline unsigned int
-MimeGperf::hash (const char *str, unsigned int len)
+MimeGperf::hash (const char *str, size_t len)
 {
   static const unsigned char asso_values[] =
     {
@@ -79,7 +85,12 @@ MimeGperf::hash (const char *str, unsigned int len)
   switch (hval)
     {
       default:
-        hval += asso_values[(unsigned char)str[12]];
+        hval += asso_values[static_cast<unsigned char>(str[12])];
+#if (defined __cplusplus && (__cplusplus >= 201703L || (__cplusplus >= 201103L && defined __clang__ && __clang_major__ + (__clang_minor__ >= 9) > 3))) || (defined __STDC_VERSION__ && __STDC_VERSION__ >= 202000L && ((defined __GNUC__ && __GNUC__ >= 10) || (defined __clang__ && __clang_major__ >= 9)))
+      [[fallthrough]];
+#elif (defined __GNUC__ && __GNUC__ >= 7) || (defined __clang__ && __clang_major__ >= 10)
+      __attribute__ ((__fallthrough__));
+#endif
       /*FALLTHROUGH*/
       case 12:
       case 11:
@@ -87,14 +98,14 @@ MimeGperf::hash (const char *str, unsigned int len)
       case 9:
       case 8:
       case 7:
-        hval += asso_values[(unsigned char)str[6]];
+        hval += asso_values[static_cast<unsigned char>(str[6])];
         break;
     }
   return hval;
 }
 
-const char *
-MimeGperf::lookup (const char *str, unsigned int len)
+const struct MimeGperfEntry *
+MimeGperf::lookup (const char *str, size_t len)
 {
   enum
     {
@@ -105,43 +116,72 @@ MimeGperf::lookup (const char *str, unsigned int len)
       MAX_HASH_VALUE = 30
     };
 
-  static const char * const wordlist[] =
+  static const unsigned char lengthtable[] =
     {
-      "", "", "", "", "", "", "", "",
-      "text/css",
-      "font/woff",
-      "font/woff2",
-      "",
-      "image/gif",
-      "image/webp",
-      "video/mp4",
-      "audio/mpeg",
-      "", "",
-      "text/html",
-      "image/png",
-      "image/jpeg",
-      "", "",
-      "text/plain",
-      "application/xml",
-      "application/pdf",
-      "application/json",
-      "", "", "",
-      "application/zip"
+       0,  0,  0,  0,  0,  0,  0,  0,  8,  9, 10,  0,  9, 10,
+       9, 10,  0,  0,  9,  9, 10,  0,  0, 10, 15, 15, 16,  0,
+       0,  0, 15
     };
+#if (defined __GNUC__ && __GNUC__ + (__GNUC_MINOR__ >= 6) > 4) || (defined __clang__ && __clang_major__ >= 3)
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wmissing-field-initializers"
+#endif
+  static const struct MimeGperfEntry wordlist[] =
+    {
+      {""}, {""}, {""}, {""}, {""}, {""}, {""}, {""},
+#line 19 "mime.gperf"
+      {"text/css", 2},
+#line 31 "mime.gperf"
+      {"font/woff", 14},
+#line 30 "mime.gperf"
+      {"font/woff2", 13},
+      {""},
+#line 26 "mime.gperf"
+      {"image/gif", 9},
+#line 27 "mime.gperf"
+      {"image/webp", 10},
+#line 29 "mime.gperf"
+      {"video/mp4", 12},
+#line 28 "mime.gperf"
+      {"audio/mpeg", 11},
+      {""}, {""},
+#line 17 "mime.gperf"
+      {"text/html", 0},
+#line 24 "mime.gperf"
+      {"image/png", 7},
+#line 25 "mime.gperf"
+      {"image/jpeg", 8},
+      {""}, {""},
+#line 18 "mime.gperf"
+      {"text/plain", 1},
+#line 21 "mime.gperf"
+      {"application/xml", 4},
+#line 22 "mime.gperf"
+      {"application/pdf", 5},
+#line 20 "mime.gperf"
+      {"application/json", 3},
+      {""}, {""}, {""},
+#line 23 "mime.gperf"
+      {"application/zip", 6}
+    };
+#if (defined __GNUC__ && __GNUC__ + (__GNUC_MINOR__ >= 6) > 4) || (defined __clang__ && __clang_major__ >= 3)
+#pragma GCC diagnostic pop
+#endif
 
   if (len <= MAX_WORD_LENGTH && len >= MIN_WORD_LENGTH)
     {
       unsigned int key = hash (str, len);
 
       if (key <= MAX_HASH_VALUE)
-        {
-          const char *s = wordlist[key];
+        if (len == lengthtable[key])
+          {
+            const char *s = wordlist[key].name;
 
-          if (*str == *s && !strncmp (str + 1, s + 1, len - 1) && s[len] == '\0')
-            return s;
-        }
+            if (*str == *s && !memcmp (str + 1, s + 1, len - 1))
+              return &wordlist[key];
+          }
     }
-  return 0;
+  return static_cast<struct MimeGperfEntry *> (0);
 }
-#line 26 "mime.gperf"
+#line 32 "mime.gperf"
 
