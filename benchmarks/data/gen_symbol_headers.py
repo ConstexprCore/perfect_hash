@@ -11,7 +11,8 @@ Outputs (next to this script):
                        not on Nasdaq (misses)
   sp500_symbols.inc    every S&P 500 constituent (hits) + Nasdaq-listed symbols not in the
                        S&P 500 (misses)
-  nasdaq.gperf / sp500.gperf   inputs for GNU gperf (the classic comparison lane)
+  nasdaq.gperf / sp500.gperf   inputs for GNU gperf (the classic comparison lane);
+                               ../gperf/regenerate.sh turns them into *_gperf.inc
 
 Symbols are sorted and de-duplicated so the key order is reproducible.
 """
@@ -73,11 +74,15 @@ emit_inc("nasdaq_symbols.inc", "nasdaq_symbols", nasdaq, "nasdaq_miss_symbols", 
 emit_inc("sp500_symbols.inc", "sp500_symbols", sp500, "sp500_miss_symbols", sp500_misses,
          f"{len(sp500)} S&P 500 constituents, misses = Nasdaq-listed symbols not in the index")
 
+# A map like the other methods (%struct-type, value = declaration index).
+# %compare-strncmp rather than %compare-lengths: faster on short keys (issue #29).
+# Regenerate the .inc files with ../gperf/regenerate.sh.
 def emit_gperf(fname, cls, syms):
     with open(os.path.join(here, fname), "w", encoding="utf-8") as f:
         f.write(f"%{{\n#include <string.h>\n%}}\n%language=C++\n%define class-name {cls}\n")
-        f.write("%define lookup-function-name lookup\n%readonly-tables\n%compare-strncmp\n%%\n")
-        for s in syms: f.write(s + "\n")
+        f.write("%define lookup-function-name lookup\n%struct-type\n%readonly-tables\n%enum\n%compare-strncmp\n")
+        f.write(f"struct {cls}Entry {{ const char *name; int value; }};\n%%\n")
+        for i, s in enumerate(syms): f.write(f"{s}, {i}\n")
         f.write("%%\n")
 
 emit_gperf("nasdaq.gperf", "NasdaqGperf", nasdaq)

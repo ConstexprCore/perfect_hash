@@ -1,0 +1,27 @@
+%{
+#include <cstring>
+/* A map, like the other benchmark methods: the value is the declaration index.
+   %compare-lengths: lengths first, then memcmp: faster than strncmp on this set's long or
+   similar keys.
+   Regenerate with regenerate.sh. */
+%}
+%language=C++
+%define class-name CountersGperf
+%define lookup-function-name lookup
+%struct-type
+%readonly-tables
+%enum
+%compare-lengths
+struct CountersGperfEntry { const char *name; int value; };
+%%
+total_items, 0
+successful_operations, 1
+failed_operations, 2
+warnings, 3
+errors, 4
+retries, 5
+bytes_processed, 6
+records_read, 7
+records_matched, 8
+records_written, 9
+%%

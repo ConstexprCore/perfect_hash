@@ -23,7 +23,6 @@
 #include <set>
 #include <string>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 #include <ankerl/unordered_dense.h>
 #include <absl/container/flat_hash_map.h>
@@ -97,13 +96,16 @@ namespace gperf_mime {
 #include "gperf/mime_gperf.inc"
 }
 namespace gperf_letters {
-#include "letters26_gperf.inc"
+#include "gperf/letters26_gperf.inc"
 }
 namespace gperf_headers50 {
-#include "http_headers50_gperf.inc"
+#include "gperf/http_headers50_gperf.inc"
 }
 namespace gperf_jsreserved {
-#include "jsreserved_gperf.inc"
+#include "gperf/jsreserved_gperf.inc"
+}
+namespace gperf_counters {
+#include "gperf/counters_gperf.inc"
 }
 
 // ============================================================================
@@ -979,23 +981,8 @@ std::optional<int> jsreserved_naive(std::string_view s) {
 }
 
 auto gperf_jsreserved_fn = [](std::string_view s) -> std::optional<int> {
-  auto result = gperf_jsreserved::JsReservedGperf::lookup(s.data(), s.size());
-  if (result) {
-    static const std::unordered_map<std::string_view, int> map = {
-      {"await", 0}, {"break", 1}, {"case", 2}, {"catch", 3}, {"class", 4},
-      {"const", 5}, {"continue", 6}, {"debugger", 7}, {"default", 8}, {"delete", 9},
-      {"do", 10}, {"else", 11}, {"enum", 12}, {"export", 13}, {"extends", 14},
-      {"false", 15}, {"finally", 16}, {"for", 17}, {"function", 18}, {"if", 19},
-      {"import", 20}, {"in", 21}, {"instanceof", 22}, {"new", 23}, {"null", 24},
-      {"return", 25}, {"super", 26}, {"switch", 27}, {"this", 28}, {"throw", 29},
-      {"true", 30}, {"try", 31}, {"typeof", 32}, {"var", 33}, {"void", 34},
-      {"while", 35}, {"with", 36}, {"yield", 37}, {"implements", 38}, {"interface", 39},
-      {"package", 40}, {"private", 41}, {"protected", 42}, {"public", 43}, {"static", 44}
-    };
-    auto it = map.find(result);
-    if (it != map.end()) return it->second;
-  }
-  return std::nullopt;
+  auto r = gperf_jsreserved::JsReservedGperf::lookup(s.data(), s.size());
+  return r ? std::optional<int>(r->value) : std::nullopt;
 };
 
 // ============================================================================
@@ -1046,16 +1033,9 @@ std::optional<int> counters_naive(std::string_view s) {
   return std::nullopt;
 }
 
-// Keep gperf method available for this keyset without adding another generated gperf include.
 auto gperf_counters_fn = [](std::string_view s) -> std::optional<int> {
-  static const std::unordered_set<std::string_view> keys = {
-      "total_items", "successful_operations", "failed_operations",
-      "warnings", "errors", "retries", "bytes_processed",
-      "records_read", "records_matched", "records_written"};
-  if (keys.find(s) != keys.end()) {
-    return std::optional<int>(1);
-  }
-  return std::nullopt;
+  auto r = gperf_counters::CountersGperf::lookup(s.data(), s.size());
+  return r ? std::optional<int>(r->value) : std::nullopt;
 };
 
 // ============================================================================
@@ -1065,7 +1045,7 @@ auto gperf_counters_fn = [](std::string_view s) -> std::optional<int> {
 // ============================================================================
 #include "data/fqcn_keys.inc"
 namespace gperf_fqcn {
-#include "fqcn_gperf.inc"
+#include "gperf/fqcn_gperf.inc"
 }
 
 static constexpr auto fqcn_phf = ConstexprCore::make_perfect_map<FQCN_KV_LIST>();
@@ -1097,7 +1077,7 @@ std::optional<int> fqcn_naive(std::string_view s) {
 
 auto gperf_fqcn_fn = [](std::string_view s) -> std::optional<int> {
   auto r = gperf_fqcn::FqcnGperf::lookup(s.data(), s.size());
-  return r ? std::optional<int>(static_cast<int>(r[0])) : std::nullopt;
+  return r ? std::optional<int>(r->value) : std::nullopt;
 };
 
 // ============================================================================
@@ -1179,11 +1159,13 @@ bool verify_keyset(const std::string &name,
     }
     // Note: kronuz may false-positive on misses due to hash collisions — not checked
 
-    // gperf (returns first char of matched string, only checks hit/miss for value)
+    // gperf (%struct-type entry; the value is the declaration index)
     auto gperf_result = gperf_fn(key);
     if (is_hit) {
       if (!gperf_result)
         fail(std::format("gperf: missed hit key '{}'", key));
+      else if (*gperf_result != ref_val)
+        fail(std::format("gperf: key '{}' got {} expected {}", key, *gperf_result, ref_val));
     } else {
       if (gperf_result)
         fail(std::format("gperf: false positive for miss key '{}'", key));
@@ -1238,34 +1220,34 @@ int main(int argc, char *argv[]) {
     }
   }
 
-  // gperf wrapper: lookup returns const char* (null on miss) → std::optional<int>
+  // gperf wrapper: lookup returns the %struct-type entry (null on miss) → its value
   auto gperf_protocol = [](std::string_view s) -> std::optional<int> {
     auto r = gperf_protocol::ProtocolGperf::lookup(s.data(), s.size());
-    return r ? std::optional<int>(static_cast<int>(r[0])) : std::nullopt;
+    return r ? std::optional<int>(r->value) : std::nullopt;
   };
   auto gperf_stock = [](std::string_view s) -> std::optional<int> {
     auto r = gperf_stock::StockGperf::lookup(s.data(), s.size());
-    return r ? std::optional<int>(static_cast<int>(r[0])) : std::nullopt;
+    return r ? std::optional<int>(r->value) : std::nullopt;
   };
   auto gperf_keyword = [](std::string_view s) -> std::optional<int> {
     auto r = gperf_keyword::KeywordGperf::lookup(s.data(), s.size());
-    return r ? std::optional<int>(static_cast<int>(r[0])) : std::nullopt;
+    return r ? std::optional<int>(r->value) : std::nullopt;
   };
   auto gperf_header = [](std::string_view s) -> std::optional<int> {
     auto r = gperf_header::HeaderGperf::lookup(s.data(), s.size());
-    return r ? std::optional<int>(static_cast<int>(r[0])) : std::nullopt;
+    return r ? std::optional<int>(r->value) : std::nullopt;
   };
   auto gperf_mime = [](std::string_view s) -> std::optional<int> {
     auto r = gperf_mime::MimeGperf::lookup(s.data(), s.size());
-    return r ? std::optional<int>(static_cast<int>(r[0])) : std::nullopt;
+    return r ? std::optional<int>(r->value) : std::nullopt;
   };
   auto gperf_letters = [](std::string_view s) -> std::optional<int> {
     auto r = gperf_letters::Letters26Gperf::lookup(s.data(), s.size());
-    return r ? std::optional<int>(static_cast<int>(r[0])) : std::nullopt;
+    return r ? std::optional<int>(r->value) : std::nullopt;
   };
   auto gperf_headers50 = [](std::string_view s) -> std::optional<int> {
     auto r = gperf_headers50::HttpHeaders50Gperf::lookup(s.data(), s.size());
-    return r ? std::optional<int>(static_cast<int>(r[0])) : std::nullopt;
+    return r ? std::optional<int>(r->value) : std::nullopt;
   };
 
   if (verify) {
