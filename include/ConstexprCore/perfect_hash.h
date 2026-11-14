@@ -717,17 +717,9 @@ struct perfect_hash_set {
                     : static_cast<std::size_t>(pos);
                 std::size_t has = static_cast<std::size_t>(idx < klen);
 #if defined(__x86_64__) || defined(_M_X64)
-                // A select rather than `idx & -has`. Once the map is constant-
-                // folded, idx is a constant; when it is not a valid address
-                // scale (1, 2, 4, 8), gcc builds the mask -has with
-                // `seta %al; shl $63; sar $63` and no prior `xor`. The byte
-                // write merges into the register's previous value, which in a
-                // lookup loop is the previous lookup's result: the lookups
-                // then run one after the other (Java FQCNs, byte 26: 6.7 ->
-                // 2.9 ns per hit on Emerald Rapids, GCC 16). The select
-                // avoids that, but gcc sometimes compiles it to a branch:
-                // S&P 100 hits go from 2.4 to 3.9 ns. AArch64 has no
-                // partial-register writes, so it keeps the mask.
+                // Not `idx & -has`: gcc may build that mask with a `setcc`
+                // into a byte register, a false dependency on the previous
+                // lookup. AArch64 has no partial-register writes.
                 std::size_t safe_idx = idx < klen ? idx : 0;
 #else
                 std::size_t safe_idx = idx & -has;
