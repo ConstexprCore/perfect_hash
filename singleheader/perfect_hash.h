@@ -1,4 +1,4 @@
-/* auto-generated on 2026-11-14 21:43:16 +0000. Do not edit! */
+/* auto-generated on 2026-11-14 18:36:57 -0500. Do not edit! */
 /*
  * ConstexprCore perfect_hash 0.5.0 — single-header amalgamation.
  *
@@ -3938,7 +3938,14 @@ struct perfect_hash_set {
                     ? (klen - std::size_t{1})
                     : static_cast<std::size_t>(pos);
                 std::size_t has = static_cast<std::size_t>(idx < klen);
+#if defined(__x86_64__) || defined(_M_X64)
+                // Not `idx & -has`: gcc may build that mask with a `setcc`
+                // into a byte register, a false dependency on the previous
+                // lookup. AArch64 has no partial-register writes.
+                std::size_t safe_idx = idx < klen ? idx : 0;
+#else
                 std::size_t safe_idx = idx & -has;
+#endif
                 unsigned char byte_val = static_cast<unsigned char>(kp[safe_idx]);
                 h += static_cast<std::size_t>(asso_values_[i][byte_val]) & -has;
             }
