@@ -39,10 +39,6 @@ jobs:
         with:
           fetch-depth: 0
 
-      # HTTPS credentials for the private dependency the amalgamation bundles.
-      - name: Configure git credentials
-        run: git config --global url."https://x-access-token:${{ secrets.USEFUL_ABSTRACTIONS_PAT }}@github.com/".insteadOf "https://github.com/"
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"

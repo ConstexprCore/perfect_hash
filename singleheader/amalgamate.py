@@ -40,6 +40,7 @@ DEFAULT_OUTPUT = SCRIPT_DIR / "perfect_hash.h"
 DEFAULT_DEMO = SCRIPT_DIR / "amalgamation_demo.cpp"
 
 DEPENDENCY_REPO = "https://github.com/ConstexprCore/useful_abstractions.git"
+DEPENDENCY_REF = "v0.1.0"  # keep in sync with GIT_TAG in CMakeLists.txt
 DEPENDENCY_DIR_NAME = "useful_abstractions"
 
 INCLUDE_RE = re.compile(r'^\s*#\s*include\s*(?:"([^"]+)"|<([^>]+)>)')
@@ -100,8 +101,8 @@ def find_dependency_include_dirs(explicit: list[Path], fetch: bool) -> list[Path
     cache = Path(tempfile.gettempdir()) / f"perfect_hash-{DEPENDENCY_DIR_NAME}"
     if not (cache / "include" / "ConstexprCore" / "fixed_string.h").is_file():
         shutil.rmtree(cache, ignore_errors=True)
-        log(f"cloning {DEPENDENCY_REPO}")
-        subprocess.run(["git", "clone", "--depth", "1", DEPENDENCY_REPO, str(cache)], check=True)
+        log(f"cloning {DEPENDENCY_REPO} @ {DEPENDENCY_REF}")
+        subprocess.run(["git", "clone", "--depth", "1", "--branch", DEPENDENCY_REF, DEPENDENCY_REPO, str(cache)], check=True)
     log(f"dependency: {cache / 'include'}")
     return [cache / "include"]
 
