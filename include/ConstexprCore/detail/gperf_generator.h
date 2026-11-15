@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <type_traits>
 
 namespace ConstexprCore::detail {
 
@@ -906,7 +907,7 @@ consteval phf_result<N> compute_phf_hd_po2(
 // one memcpy at runtime. (Little-endian targets only: the same assumption
 // the packed_keys_ comparison paths already make.)
 constexpr std::uint64_t fh_load_chunk(const char* p, std::size_t len, std::size_t off) {
-    if consteval {
+    if (std::is_constant_evaluated()) {
         std::uint64_t c = 0;
         for (std::size_t b = 0; b < 8 && off + b < len; ++b)
             c |= static_cast<std::uint64_t>(static_cast<unsigned char>(p[off + b])) << (8 * b);

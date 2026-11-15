@@ -10,4 +10,4 @@ FetchContent_MakeAvailable(perfect_hash)
 
 add_executable(consumer ../consumer.cpp)
 target_link_libraries(consumer PRIVATE ConstexprCore::perfect_hash)
-target_compile_features(consumer PRIVATE cxx_std_23)
+target_compile_features(consumer PRIVATE cxx_std_20)
