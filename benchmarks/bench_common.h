@@ -84,7 +84,7 @@ void run_method(const std::string &label, std::vector<std::string_view> &input, 
   std::vector<int> results(input.size(), 0);
   std::mt19937_64 gen(42);
   auto shuffle = [&]() { std::shuffle(input.begin(), input.end(), gen); };
-  auto body = [&]() {
+  auto body = [&]() BENCH_NOINLINE {
     for (size_t i = 0; i < input.size(); i++) {
       auto r = lookup(input[i]);
       if (r) results[i] = static_cast<int>(*r);

@@ -168,7 +168,7 @@ void bench_workload(const std::string &label,
   // make_perfect_map (perfect_hash_set-based, not NTTP constexpr_perfect_map)
   if (filter.run_method("make_perfect_map")) {
     gen.seed(42);
-    auto phf_fn = [&]() {
+    auto phf_fn = [&]() BENCH_NOINLINE {
       for (size_t i = 0; i < input.size(); i++) {
         auto opt = phf_map.lookup(input[i]);
         if (opt) results[i] = static_cast<int>(*opt);
@@ -185,7 +185,7 @@ void bench_workload(const std::string &label,
   // naive if/else
   if (filter.run_method("naive")) {
     gen.seed(42);
-    auto naive_bench = [&]() {
+    auto naive_bench = [&]() BENCH_NOINLINE {
       for (size_t i = 0; i < input.size(); i++) {
         auto opt = naive_fn(input[i]);
         if (opt) results[i] = *opt;
@@ -199,7 +199,7 @@ void bench_workload(const std::string &label,
   // std::unordered_map
   if (filter.run_method("unordered_map")) {
     gen.seed(42);
-    auto uset_fn = [&]() {
+    auto uset_fn = [&]() BENCH_NOINLINE {
       for (size_t i = 0; i < input.size(); i++) {
         auto it = uset.find(input[i]);
         if (it != uset.end()) results[i] = it->second;
@@ -217,7 +217,7 @@ void bench_workload(const std::string &label,
       for (auto& [k, v] : uset) amap[k] = v;
     }
     gen.seed(42);
-    auto amap_fn = [&]() {
+    auto amap_fn = [&]() BENCH_NOINLINE {
       for (size_t i = 0; i < input.size(); i++) {
         auto it = amap.find(input[i]);
         if (it != amap.end()) results[i] = it->second;
@@ -236,7 +236,7 @@ void bench_workload(const std::string &label,
       for (auto& [k, v] : uset) absmap[k] = v;
     }
     gen.seed(42);
-    auto absmap_fn = [&]() {
+    auto absmap_fn = [&]() BENCH_NOINLINE {
       for (size_t i = 0; i < input.size(); i++) {
         auto it = absmap.find(input[i]);
         if (it != absmap.end()) results[i] = it->second;
@@ -251,7 +251,7 @@ void bench_workload(const std::string &label,
   // frozen::unordered_map (compile-time perfect hash)
   if (filter.run_method("frozen")) {
     gen.seed(42);
-    auto frozen_fn = [&]() {
+    auto frozen_fn = [&]() BENCH_NOINLINE {
       for (size_t i = 0; i < input.size(); i++) {
         auto it = frozen_map.find(frozen::string(input[i].data(), input[i].size()));
         if (it != frozen_map.end()) results[i] = it->second;
@@ -265,7 +265,7 @@ void bench_workload(const std::string &label,
   // Kronuz constexpr-phf (hash-based perfect hash)
   if (filter.run_method("kronuz")) {
     gen.seed(42);
-    auto kronuz_fn = [&]() {
+    auto kronuz_fn = [&]() BENCH_NOINLINE {
       for (size_t i = 0; i < input.size(); i++) {
         auto h = fnv1ah32::hash(input[i].data(), input[i].size());
         auto pos = kronuz_phf.find(h);
@@ -280,7 +280,7 @@ void bench_workload(const std::string &label,
   // gperf (GNU perfect hash)
   if (filter.run_method("gperf")) {
     gen.seed(42);
-    auto gperf_bench = [&]() {
+    auto gperf_bench = [&]() BENCH_NOINLINE {
       for (size_t i = 0; i < input.size(); i++) {
         auto result = gperf_fn(input[i]);
         if (result) results[i] = *result;
@@ -305,7 +305,7 @@ void bench_pthash(const std::string &label,
     std::shuffle(input.begin(), input.end(), gen);
   };
   gen.seed(42);
-  auto pthash_bench = [&]() {
+  auto pthash_bench = [&]() BENCH_NOINLINE {
     pthash_map.bench_lookup(input, results);
   };
   pretty_print(label + " pthash", num_strings,

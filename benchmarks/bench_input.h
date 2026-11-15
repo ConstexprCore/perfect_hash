@@ -8,6 +8,15 @@
 #include <string_view>
 #include <vector>
 
+// Marks a lambda holding a timed loop. Each method's loop then becomes a
+// function of its own, so that its register allocation does not depend on
+// the other methods inlined into the same benchmark function.
+#if defined(_MSC_VER) && !defined(__clang__)
+#define BENCH_NOINLINE [[msvc::noinline]]
+#else
+#define BENCH_NOINLINE __attribute__((noinline))
+#endif
+
 namespace benchx {
 
 inline std::vector<std::string_view> build_input(
